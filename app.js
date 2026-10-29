@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 9;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 10;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -391,15 +391,108 @@
   // 레시피 탭: 레시피북처럼 분류별 표 (메뉴 | 레시피) + 맨 아래 기본 기준
   var recipeAll = false;   // false: 메뉴마다 기본(첫) 레시피 한 줄만
   function renderRecipes() {
-    var empty = !state.notes.length && !state.menus.some(function (m) { return m.recipe; });
-    view.innerHTML = (empty ? '<div class="empty">아직 레시피가 없어요.<br>레시피 파일을 받았다면 아래 버튼으로 불러오세요.' +
-        '<button class="btn primary block" data-act="import">레시피 파일 불러오기</button></div>' : '') +
+    view.innerHTML = '<div class="card docs"><div class="name">📄 내 레시피북 파일 (PDF·워드)</div><div id="docs" class="sub">불러오는 중…</div>' +
+      '<button class="btn primary block" data-act="doc-add">+ PDF·워드 파일 넣기</button>' +
+      '<p class="hint">넣은 파일은 이 휴대폰 안에만 저장돼요. 인터넷에 올라가지 않아요.</p></div>' +
       (state.menus.length ? controls('recipes', state.menus, '레시피 찾기 (예: 라떼)') +
         '<label class="check"><input type="checkbox" data-act="recipe-all"' + (recipeAll ? ' checked' : '') +
         '> HOT·사이즈업 레시피도 보기</label>' : '') + '<div id="list"></div>' +
       notesHtml() + '<p class="hint">레시피를 고치려면 메뉴 탭에서 메뉴를 누르고 "만드는 법"을 고치세요.</p>';
     drawRecipes();
+    drawDocs();
   }
+  // ---------- 레시피북 파일 (PDF·워드). 크기가 커서 localStorage 대신 IndexedDB 에 저장 ----------
+  function idb() {
+    return new Promise(function (res, rej) {
+      var r = indexedDB.open('wongagesan-files', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('files', { keyPath: 'id' }); };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { rej(r.error); };
+    });
+  }
+  function idbDo(mode, fn) {
+    return idb().then(function (db) {
+      return new Promise(function (res, rej) {
+        var tx = db.transaction('files', mode), req = fn(tx.objectStore('files'));
+        tx.oncomplete = function () { res(req && req.result); };
+        tx.onerror = function () { rej(tx.error); };
+      });
+    });
+  }
+  function docKind(f) {
+    var n = (f.name || '').toLowerCase();
+    if (/\.pdf$/.test(n) || f.type === 'application/pdf') return 'pdf';
+    if (/\.docx$/.test(n)) return 'docx';
+    return '';
+  }
+  function drawDocs() {
+    var box = document.getElementById('docs');
+    if (!box) return;
+    idbDo('readonly', function (s) { return s.getAll(); }).then(function (list) {
+      list = (list || []).sort(function (a, b) { return a.added < b.added ? 1 : -1; });
+      box.innerHTML = list.length ? list.map(function (d) {
+        return '<div class="docrow"><button class="docopen" data-act="doc-open" data-id="' + d.id + '">' +
+          (d.kind === 'pdf' ? '📕 ' : '📘 ') + esc(d.name) + '<small>' + (Math.round(d.size / 102.4) / 10) + 'KB · ' + d.added.slice(0, 10) + '</small></button>' +
+          '<button class="mini danger" data-act="doc-del" data-id="' + d.id + '">삭제</button></div>';
+      }).join('') : '아직 넣은 파일이 없어요.';
+    }, function () { box.textContent = '이 휴대폰에서는 파일을 저장할 수 없어요.'; });
+  }
+  function addDoc(file) {
+    var kind = docKind(file);
+    if (!kind) return alert(/\.doc$/i.test(file.name) ? '옛날 워드 파일(.doc)은 열 수 없어요. 워드에서 "다른 이름으로 저장 → .docx 또는 PDF"로 바꿔서 넣어 주세요.'
+      : 'PDF(.pdf)나 워드(.docx) 파일만 넣을 수 있어요.');
+    if (file.size > 30 * 1024 * 1024) return alert('파일이 너무 커요 (30MB까지).');
+    var rec = { id: newId(), name: file.name, kind: kind, size: file.size, added: new Date().toISOString(), blob: file };
+    idbDo('readwrite', function (s) { return s.put(rec); }).then(function () { drawDocs(); openDoc(rec.id); },
+      function () { alert('파일을 저장하지 못했어요. 휴대폰 저장 공간을 확인해 주세요.'); });
+  }
+  var libs = {};
+  function loadScript(src) {
+    if (!libs[src]) libs[src] = new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = function () { delete libs[src]; rej(new Error(src)); };
+      document.head.appendChild(s);
+    });
+    return libs[src];
+  }
+  function openDoc(id) {
+    idbDo('readonly', function (s) { return s.get(id); }).then(function (d) {
+      if (!d) return;
+      openSheet('<h2>' + esc(d.name) + '</h2><div id="docview" class="docview">여는 중…</div>');
+      var out = document.getElementById('docview');
+      var fail = function () { if (out) out.textContent = '파일을 열지 못했어요. 처음 열 때는 인터넷이 연결돼 있어야 해요.'; };
+      d.blob.arrayBuffer().then(function (buf) {
+        if (d.kind === 'pdf') {
+          return loadScript('./lib/pdf.min.js').then(function () {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdf.worker.min.js';
+            // 한글 글꼴이 파일에 안 들어 있는 PDF도 글자가 보이게 (글꼴 지도·기본 글꼴)
+            // 주소는 전체 주소로 (일꾼 파일 위치 기준으로 찾지 않게)
+            var at = function (p) { return new URL(p, location.href).href; };
+            return window.pdfjsLib.getDocument({ data: buf, cMapUrl: at('./lib/cmaps/'), cMapPacked: true,
+              standardFontDataUrl: at('./lib/standard_fonts/') }).promise;
+          }).then(function (pdf) {
+            out.innerHTML = '';
+            var chain = Promise.resolve();
+            for (var p = 1; p <= pdf.numPages; p++) (function (no) {
+              chain = chain.then(function () { return pdf.getPage(no); }).then(function (page) {
+                var w = out.clientWidth || 360, base = page.getViewport({ scale: 1 });
+                var vp = page.getViewport({ scale: w / base.width * Math.min(window.devicePixelRatio || 1, 3) });
+                var c = document.createElement('canvas');
+                c.width = vp.width; c.height = vp.height; c.className = 'pdfpage';
+                out.appendChild(c);
+                return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+              });
+            })(p);
+            return chain;
+          });
+        }
+        return loadScript('./lib/mammoth.browser.min.js').then(function () {
+          return window.mammoth.convertToHtml({ arrayBuffer: buf });
+        }).then(function (r) { out.innerHTML = '<div class="docx">' + r.value + '</div>'; });
+      }).catch(fail);
+    });
+  }
+
   // "카페라떼 HOT 사이즈업" → 이름 "카페라떼", 표시 "HOT 사이즈업"
   function splitName(n) {
     var m = n.match(/^(.*?)\s+((?:ICE|HOT)(?:\s+사이즈업)?|사이즈업)$/);
@@ -708,6 +801,12 @@
       case 'settings-save': saveSettings(); break;
       case 'closed': t.classList.toggle('on'); break;
       case 'reload': hardReload(); break;
+      case 'doc-add': docInput.value = ''; docInput.click(); break;
+      case 'doc-open': openDoc(id); break;
+      case 'doc-del':
+        if (confirm('이 파일을 앱에서 지울까요? (휴대폰의 원래 파일은 그대로예요)'))
+          idbDo('readwrite', function (s) { return s.delete(id); }).then(drawDocs);
+        break;
       case 'recipe-all': recipeAll = t.checked; drawRecipes(); break;
       case 'note-new': noteSheet(null); break;
       case 'note-edit': noteSheet(Number(t.getAttribute('data-i'))); break;
@@ -745,6 +844,8 @@
     }
   });
   fileInput.addEventListener('change', function () { if (fileInput.files[0]) importData(fileInput.files[0]); });
+  var docInput = document.getElementById('docfile');
+  docInput.addEventListener('change', function () { if (docInput.files[0]) addDoc(docInput.files[0]); });
 
   render();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

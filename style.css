@@ -61,6 +61,17 @@ label { display: block; margin-top: 12px; font-weight: 600; font-size: 15px; }
 .tag { display: inline-block; padding: 0 6px; border-radius: 6px; background: #e6f0ec; color: #2f6f5e; font-size: 12px; font-weight: 700; }
 .check { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 4px 2px 0; min-height: 40px; }
 .check input { width: 22px; height: 22px; }
+/* 레시피북 파일 */
+.docrow { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.docopen { flex: 1; min-width: 0; min-height: 48px; text-align: left; padding: 6px 10px; border: 1px solid #cfdcd6; border-radius: 10px; background: #f6faf8; font-weight: 600; overflow-wrap: anywhere; }
+.docopen small { display: block; font-weight: 400; color: #777; font-size: 13px; }
+.mini.danger { border-color: #c62828; color: #c62828; }
+.docview { margin: 0 -14px; }
+.docview .pdfpage { display: block; width: 100%; height: auto; border-bottom: 6px solid #eee; }
+.docx { padding: 0 14px; font-size: 15px; line-height: 1.5; }
+.docx table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.docx td, .docx th { border: 1px solid #ccc; padding: 4px 6px; vertical-align: top; }
+.docx img { max-width: 100%; height: auto; }
 /* 입력창 맨 위 닫기 */
 .sheettop { position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end; background: #fff; margin: -16px -14px 6px; padding: 8px 10px; border-bottom: 1px solid #eee; }
 .topclose { min-height: 44px; padding: 0 14px; border: 1px solid #bbb; border-radius: 10px; background: #fff; font-size: 16px; }
