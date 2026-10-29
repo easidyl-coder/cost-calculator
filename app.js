@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 7;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 8;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -388,31 +388,66 @@
         Math.round(Calc.RATE_MAX * 100) + '% 초과일 때만 표시돼요.</p>' : '');
     drawMenus();
   }
-  // 레시피 탭: 공통 기준 메모 + 메뉴별 만드는 법
+  // 레시피 탭: 레시피북처럼 분류별 표 (메뉴 | 레시피) + 맨 아래 기본 기준
+  var recipeAll = false;   // false: 메뉴마다 기본(첫) 레시피 한 줄만
   function renderRecipes() {
     var empty = !state.notes.length && !state.menus.some(function (m) { return m.recipe; });
     view.innerHTML = (empty ? '<div class="empty">아직 레시피가 없어요.<br>레시피 파일을 받았다면 아래 버튼으로 불러오세요.' +
         '<button class="btn primary block" data-act="import">레시피 파일 불러오기</button></div>' : '') +
-      notesHtml() +
-      (state.menus.length ? controls('recipes', state.menus, '레시피 찾기 (예: 라떼)') : '') + '<div id="list"></div>';
+      (state.menus.length ? controls('recipes', state.menus, '레시피 찾기 (예: 라떼)') +
+        '<label class="check"><input type="checkbox" data-act="recipe-all"' + (recipeAll ? ' checked' : '') +
+        '> HOT·사이즈업 레시피도 보기</label>' : '') + '<div id="list"></div>' +
+      notesHtml() + '<p class="hint">레시피를 고치려면 메뉴 탭에서 메뉴를 누르고 "만드는 법"을 고치세요.</p>';
     drawRecipes();
+  }
+  // "카페라떼 HOT 사이즈업" → 이름 "카페라떼", 표시 "HOT 사이즈업"
+  function splitName(n) {
+    var m = n.match(/^(.*?)\s+((?:ICE|HOT)(?:\s+사이즈업)?|사이즈업)$/);
+    return m ? { base: m[1], tag: m[2] } : { base: n, tag: '' };
   }
   function drawRecipes() {
     var box = document.getElementById('list');
-    if (box && state.menus.length) box.innerHTML = grouped('recipes', state.menus, recipeCard);
+    if (!box || !state.menus.length) return;
+    var list = state.menus.filter(function (m) {
+      return match('recipes', m) || (m.recipe || '').replace(/\s/g, '').toLowerCase().indexOf(filt.recipes.q.replace(/\s/g, '').toLowerCase()) >= 0 &&
+        (!filt.recipes.cat || catOf(m) === filt.recipes.cat);
+    });
+    var h = '';
+    cats(state.menus).forEach(function (c) {
+      var part = list.filter(function (m) { return catOf(m) === c; });
+      if (!part.length) return;
+      var groups = [], byBase = {};
+      part.forEach(function (m) {
+        var s = splitName(m.name);
+        if (!byBase[s.base]) { byBase[s.base] = []; groups.push(s.base); }
+        byBase[s.base].push({ tag: s.tag, recipe: (m.recipe || '').trim() });
+      });
+      h += '<div class="cathead">' + esc(c) + ' <small>' + groups.length + '</small></div><table class="rtbl">';
+      groups.forEach(function (b) {
+        var rows = [];   // 레시피가 같은 것(예: 차 ICE·HOT)은 한 줄로
+        (recipeAll ? byBase[b] : byBase[b].slice(0, 1)).forEach(function (v) {
+          var same = rows.filter(function (r) { return r.recipe === v.recipe; })[0];
+          if (same) same.tags.push(v.tag); else rows.push({ tags: [v.tag], recipe: v.recipe });
+        });
+        h += '<tr><th>' + esc(b) + '</th><td>' + rows.map(function (r) {
+          var tag = r.tags.filter(Boolean).join('·');
+          if (!recipeAll && tag === 'ICE') tag = '';
+          var lines = (r.recipe || '레시피 없음').split('\n');
+          return '<div class="rline">' + (tag ? '<span class="tag">' + esc(tag) + '</span> ' : '') + esc(lines[0]) +
+            lines.slice(1).map(function (l) { return '<small>' + esc(l) + '</small>'; }).join('') + '</div>';
+        }).join('') + '</td></tr>';
+      });
+      h += '</table>';
+    });
+    box.innerHTML = h || '<p class="hint">찾는 레시피가 없어요.</p>';
   }
   function notesHtml() {
     return '<div class="cathead">기본 기준 <small>' + state.notes.length + '</small></div>' +
       state.notes.map(function (n, i) {
-        return '<details class="note"><summary>' + esc(n.title) + '</summary><div class="pre">' + esc(n.body) + '</div>' +
-          '<button class="btn slim" data-act="note-edit" data-i="' + i + '">고치기</button></details>';
+        return '<div class="note"><div class="row"><b>' + esc(n.title) + '</b>' +
+          '<button class="mini" data-act="note-edit" data-i="' + i + '">고치기</button></div><div class="pre">' + esc(n.body) + '</div></div>';
       }).join('') +
       '<button class="btn block slim" data-act="note-new">+ 기준 메모 추가 (예: 포장 구성, 시럽 만드는 법)</button>';
-  }
-  function recipeCard(m) {
-    return '<button class="card" data-act="menu-edit" data-id="' + m.id + '"><div class="row"><span class="name">' + esc(m.name) + '</span></div>' +
-      (m.recipe ? '<div class="pre">' + esc(m.recipe) + '</div>'
-        : '<div class="sub">레시피 메모가 없어요. 눌러서 "만드는 법"에 적을 수 있어요.</div>') + '</button>';
   }
   function noteSheet(i) {
     var n = i === null ? { title: '', body: '' } : state.notes[i];
@@ -459,7 +494,10 @@
   }
 
   // ---------- 아래에서 올라오는 입력창 ----------
-  function openSheet(html) { sheet.innerHTML = '<div class="panel">' + html + '</div>'; sheet.hidden = false; sheet.scrollTop = 0; }
+  function openSheet(html) {   // 닫기 버튼은 맨 위에도 (긴 입력창에서 아래까지 내리지 않게)
+    sheet.innerHTML = '<div class="panel"><div class="sheettop"><button class="topclose" data-act="close">✕ 닫기</button></div>' + html + '</div>';
+    sheet.hidden = false; sheet.scrollTop = 0;
+  }
   function closeSheet() { sheet.hidden = true; sheet.innerHTML = ''; }
   function val(id) { return document.getElementById(id).value; }
   function showErr(msg) { document.getElementById('err').textContent = msg; }
@@ -659,6 +697,7 @@
       case 'settings': settingsSheet(); break;
       case 'settings-save': saveSettings(); break;
       case 'closed': t.classList.toggle('on'); break;
+      case 'recipe-all': recipeAll = t.checked; drawRecipes(); break;
       case 'note-new': noteSheet(null); break;
       case 'note-edit': noteSheet(Number(t.getAttribute('data-i'))); break;
       case 'note-save': saveNote(t.getAttribute('data-i')); break;
