@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 10;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 11;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -21,7 +21,35 @@
     } catch (e) { s = null; }
     return fill(s || { ingredients: [], menus: [] });
   }
+  // 분류가 비어 있는 메뉴는 이름으로 분류를 짐작해 넣는다 (카페 메뉴 이름에 흔한 낱말 기준, 위에서부터 먼저 맞는 것)
+  var CAT_RULES = [
+    ['옵션', /^\[옵션\]|추가$|변경$/],
+    ['베이커리', /빵|베이글|파운드|크로플|케이크|휘낭시에|모카번|쿠키|마카롱|스콘|머핀|와플|마들렌|샌드위치/],
+    ['스무디', /스무디|프라페/],
+    ['버블티', /버블티/],
+    ['전통차', /쌍화|대추차|배도라지|식혜|수정과/],
+    ['아이스티·기타', /아이스티|아샷추|^우유|카프리썬|아이스크림/],
+    ['에이드', /에이드|콕|소다/],
+    ['주스', /주스/],
+    ['논커피 라떼', /밀크티|(오곡|곡물|초코|말차|녹차|고구마|밤|딸기|생강|흑임자|토피넛|쑥|단호박|홍차|미숫가루).*라떼/],
+    ['차', /차(\s|$)|티(\s|$)/],
+    ['커피', /아메리카노|라떼|에스프레소|카푸치노|모카|마끼아또|마키아토|콜드브루|아포가토|커피|에어리카노|플랫화이트|콘파냐/]
+  ];
+  function guessCat(name) {
+    for (var i = 0; i < CAT_RULES.length; i++) if (CAT_RULES[i][1].test(name)) return CAT_RULES[i][0];
+    return '';
+  }
+  function autoCat(s) {
+    var n = 0;
+    s.menus.forEach(function (m) {
+      if ((m.cat || '').trim()) return;
+      var c = guessCat(m.name);
+      if (c) { m.cat = c; n++; }
+    });
+    return n;
+  }
   function fill(s) {
+    autoCat(s);
     s.sales = s.sales || {};
     s.notes = s.notes || [];   // 레시피북의 공통 기준 (제목·내용)
     s.settings = s.settings || {};
@@ -701,7 +729,7 @@
     var m = null;
     if (id) state.menus.forEach(function (x) { if (x.id === id) m = x; });
     if (!m) { m = { id: newId() }; state.menus.push(m); }
-    m.name = name; m.price = price; m.cat = val('f-cat').trim(); m.recipe = val('f-recipe').trim(); m.items = editItems.map(function (it) { return { ingId: it.ingId, amount: it.amount }; });
+    m.name = name; m.price = price; m.cat = val('f-cat').trim() || guessCat(name); m.recipe = val('f-recipe').trim(); m.items = editItems.map(function (it) { return { ingId: it.ingId, amount: it.amount }; });
     save(); closeSheet(); render();
   }
   function delMenu(id) {
