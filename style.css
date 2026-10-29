@@ -1,4 +1,6 @@
 * { box-sizing: border-box; }
+/* 버튼을 빠르게 여러 번 눌러도 화면이 확대되지 않게 (두 손가락 확대는 그대로) */
+html, body, button, input, select, summary { touch-action: manipulation; }
 body { margin: 0; font-family: system-ui, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; font-size: 17px; color: #222; background: #f5f6f4; }
 .top { background: #2f6f5e; color: #fff; padding: 14px 16px; }
 .top h1 { margin: 0; font-size: 20px; }
