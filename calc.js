@@ -76,6 +76,9 @@
     if (!s || !Array.isArray(s.ingredients) || !Array.isArray(s.menus)) return false;
     if (s.sales !== undefined && (typeof s.sales !== 'object' || s.sales === null || Array.isArray(s.sales))) return false;
     if (s.settings !== undefined && (typeof s.settings !== 'object' || s.settings === null)) return false;
+    if (s.notes !== undefined && !(Array.isArray(s.notes) && s.notes.every(function (n) {
+      return n && typeof n.title === 'string' && typeof n.body === 'string';
+    }))) return false;
     if (s.sales && !Object.keys(s.sales).every(function (d) {
       var r = s.sales[d];
       return /^\d{4}-\d{2}-\d{2}$/.test(d) && r && Array.isArray(r.items) &&
@@ -87,6 +90,7 @@
     });
     var okMenu = s.menus.every(function (m) {
       return m && typeof m.id === 'string' && typeof m.name === 'string' &&
+        (m.recipe === undefined || typeof m.recipe === 'string') &&
         isNum(m.price) && Array.isArray(m.items) &&
         m.items.every(function (it) { return it && typeof it.ingId === 'string' && isNum(it.amount); });
     });

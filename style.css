@@ -43,6 +43,17 @@ label { display: block; margin-top: 12px; font-weight: 600; font-size: 15px; }
 .actions { display: flex; gap: 8px; margin-top: 16px; }
 .actions .btn { flex: 1; }
 .tabs button { padding: 0 2px; }
+.seg { display: flex; background: #e5e9e7; border-radius: 10px; padding: 3px; margin-bottom: 4px; }
+.seg button { flex: 1; min-height: 42px; border: 0; border-radius: 8px; background: none; color: #555; }
+.seg button.on { background: #fff; color: #2f6f5e; font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
+.pre { white-space: pre-wrap; font-size: 15px; line-height: 1.5; margin-top: 6px; color: #333; }
+.note { background: #fff; border-radius: 10px; padding: 8px 12px; margin: 6px 0; }
+.note summary { min-height: 36px; line-height: 36px; font-weight: 600; }
+.note .btn { margin-top: 8px; }
+textarea.f { min-height: 0; line-height: 1.5; resize: vertical; }
+.leftline { margin-top: 6px; font-size: 15px; }
+.cal .day .dl { font-size: 11px; color: #1b5e20; }
+.cal .day .dl.neg { color: #c62828; }
 .chips { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 6px; -webkit-overflow-scrolling: touch; }
 .chips button { flex: none; min-height: 40px; padding: 0 14px; border: 1px solid #ccc; border-radius: 999px; background: #fff; color: #444; font-size: 15px; }
 .chips button.on { background: #2f6f5e; border-color: #2f6f5e; color: #fff; font-weight: 700; }
@@ -75,7 +86,7 @@ label { display: block; margin-top: 12px; font-weight: 600; font-size: 15px; }
 .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-top: 6px; }
 .cal .dow { text-align: center; font-size: 13px; color: #666; padding: 2px 0; }
 .cal .dow.sun { color: #c62828; }
-.cal .day { min-height: 54px; border: 1px solid #e2e2e2; border-radius: 8px; background: #fff; padding: 3px 1px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; }
+.cal .day { min-height: 62px; border: 1px solid #e2e2e2; border-radius: 8px; background: #fff; padding: 3px 1px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; }
 .cal .day .dn { font-size: 13px; color: #444; }
 .cal .day .dp { font-size: 12px; font-weight: 700; color: #1b5e20; }
 .cal .day .dp.neg { color: #c62828; }

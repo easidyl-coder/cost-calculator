@@ -22,6 +22,7 @@
   }
   function fill(s) {
     s.sales = s.sales || {};
+    s.notes = s.notes || [];   // 레시피북의 공통 기준 (제목·내용)
     s.settings = s.settings || {};
     s.settings.fixed = s.settings.fixed || {};
     s.settings.closed = s.settings.closed || [0];   // 쉬는 요일 (0=일). 처음엔 일요일
@@ -127,7 +128,7 @@
       '<div class="sub">' + s.cups + '개 판매 · 원가율 ' + Calc.fmtPct(s.rate) +
       (Calc.isNum(r.posTotal) && Math.round(r.posTotal) !== Math.round(s.menuSales)
         ? ' · 메뉴로 계산한 매출(' + Calc.fmtWon(s.menuSales) + '원)과 ' + Calc.fmtWon(Math.abs(r.posTotal - s.menuSales)) + '원 차이' : '') +
-      '</div></div>';
+      '</div>' + leftLine(saleDate, s) + '</div>';
     var qty = {};
     r.items.forEach(function (it) { qty[it.menuId] = it; });
     var pop = popularity();
@@ -173,6 +174,22 @@
     for (var i = 1; i <= n; i++) out.push(ym + '-' + String(i).padStart(2, '0'));
     return out;
   }
+  function openDaysOf(ym) {
+    var closed = state.settings.closed;
+    return monthDays(ym).filter(function (d) { return closed.indexOf(parseYmd(d).getDay()) < 0; }).length;
+  }
+  // 고정비 하루 몫 = 그달 고정비 ÷ 그달 영업일 수 (고정비를 안 넣었으면 0)
+  function dailyShare(d) {
+    var fixed = Calc.fixedTotal(state.settings.fixed), n = openDaysOf(d.slice(0, 7));
+    return fixed > 0 && n > 0 ? fixed / n : 0;
+  }
+  function leftLine(d, s) {
+    var share = dailyShare(d);
+    if (!share || !s.cups && !s.sales) return '';
+    var left = s.profit - share;
+    return '<div class="leftline">고정비 하루 몫 ' + Calc.fmtWon(share) + '원을 빼면 <b class="' + (left < 0 ? 'neg' : 'pos') + '">' +
+      (left < 0 ? Calc.fmtWon(-left) + '원 모자라요' : Calc.fmtWon(left) + '원 남아요') + '</b></div>';
+  }
   function renderCal() {
     var days = monthDays(calMonth), today = ymd(new Date());
     var closed = state.settings.closed, fixed = Calc.fixedTotal(state.settings.fixed);
@@ -192,7 +209,7 @@
         menus[k].qty += it.qty; menus[k].profit += (it.price - it.cost) * it.qty;
       });
     });
-    var openDays = days.filter(function (d) { return closed.indexOf(parseYmd(d).getDay()) < 0; }).length;
+    var openDays = openDaysOf(calMonth), share = dailyShare(calMonth + '-01');
     var maxP = 0;
     Object.keys(sums).forEach(function (d) { maxP = Math.max(maxP, sums[d].profit); });
     var a = calMonth.split('-');
@@ -206,9 +223,13 @@
       var lv = s && maxP > 0 && s.profit > 0 ? Math.min(4, Math.ceil(s.profit / maxP * 4)) : 0;
       h += '<button class="day lv' + lv + (off ? ' off' : '') + (d === today ? ' today' : '') + '" data-act="cal-day" data-d="' + d + '">' +
         '<span class="dn">' + (+d.slice(8)) + (r && r.weather ? ' ' + r.weather : '') + '</span>' +
-        (s ? '<span class="dp' + (s.profit < 0 ? ' neg' : '') + '">' + man(s.profit) + '</span>' : (off ? '<span class="dp">쉼</span>' : '')) + '</button>';
+        (s ? '<span class="dp' + (s.profit < 0 ? ' neg' : '') + '">' + man(s.profit) + '</span>' +
+          (share ? '<span class="dl' + (s.profit - share < 0 ? ' neg' : '') + '">' + (s.profit - share < 0 ? '' : '+') + man(s.profit - share) + '</span>' : '')
+          : (off ? '<span class="dp">쉼</span>' : '')) + '</button>';
     });
-    h += '</div><p class="hint">칸 안 숫자는 그날 번 돈이에요. 날짜를 누르면 그날 판매를 넣거나 고칠 수 있어요.</p>';
+    h += '</div><p class="hint">칸 안 위 숫자는 그날 번 돈' +
+      (share ? ', 아래 +/− 숫자는 고정비 하루 몫(' + Calc.fmtWon(share) + '원)을 빼고 남은 돈' : '') +
+      '이에요. 날짜를 누르면 그날 판매를 넣거나 고칠 수 있어요.</p>';
     // 한 달 정리
     var left = tot.profit - fixed;
     h += '<div class="card"><div class="name">이번 달 정리</div><div class="grid"><div>매출<b>' + man(tot.sales) + '</b></div><div>원가<b>' +
@@ -357,16 +378,49 @@
     });
   }
 
+  var menuMode = 'cost';   // 메뉴 탭: 'cost' 원가 보기 / 'recipe' 레시피북
   function renderMenus() {
-    view.innerHTML = '<button class="btn primary block" data-act="menu-new">+ 메뉴 추가</button>' + exampleButton() +
+    var rec = menuMode === 'recipe';
+    view.innerHTML = '<div class="seg"><button data-act="mode" data-m="cost"' + (rec ? '' : ' class="on"') + '>원가</button>' +
+      '<button data-act="mode" data-m="recipe"' + (rec ? ' class="on"' : '') + '>📖 레시피북</button></div>' +
+      (rec ? notesHtml() : '<button class="btn primary block" data-act="menu-new">+ 메뉴 추가</button>' + exampleButton()) +
       (state.menus.length ? controls('menus', state.menus, '메뉴 찾기 (예: 라떼)') : '') + '<div id="list"></div>' +
-      (state.menus.length ? '<p class="hint">조정 필요: 마진 ' + Calc.fmtWon(Calc.MARGIN_MIN) + '원 미만이면서 원가율 ' +
+      (state.menus.length && !rec ? '<p class="hint">조정 필요: 마진 ' + Calc.fmtWon(Calc.MARGIN_MIN) + '원 미만이면서 원가율 ' +
         Math.round(Calc.RATE_MAX * 100) + '% 초과일 때만 표시돼요.</p>' : '');
     drawMenus();
+  }
+  function notesHtml() {
+    return '<div class="cathead">기본 기준 <small>' + state.notes.length + '</small></div>' +
+      state.notes.map(function (n, i) {
+        return '<details class="note"><summary>' + esc(n.title) + '</summary><div class="pre">' + esc(n.body) + '</div>' +
+          '<button class="btn slim" data-act="note-edit" data-i="' + i + '">고치기</button></details>';
+      }).join('') +
+      '<button class="btn block slim" data-act="note-new">+ 기준 메모 추가 (예: 포장 구성, 시럽 만드는 법)</button>';
+  }
+  function recipeCard(m) {
+    return '<button class="card" data-act="menu-edit" data-id="' + m.id + '"><div class="row"><span class="name">' + esc(m.name) + '</span></div>' +
+      (m.recipe ? '<div class="pre">' + esc(m.recipe) + '</div>'
+        : '<div class="sub">레시피 메모가 없어요. 눌러서 "만드는 법"에 적을 수 있어요.</div>') + '</button>';
+  }
+  function noteSheet(i) {
+    var n = i === null ? { title: '', body: '' } : state.notes[i];
+    openSheet('<h2>' + (i === null ? '기준 메모 추가' : '기준 메모 고치기') + '</h2>' +
+      '<label>제목</label><input id="n-title" class="f" value="' + esc(n.title) + '">' +
+      '<label>내용</label><textarea id="n-body" class="f" rows="10">' + esc(n.body) + '</textarea>' +
+      '<div class="err" id="err"></div><div class="actions"><button class="btn" data-act="close">닫기</button>' +
+      (i === null ? '' : '<button class="btn danger" data-act="note-del" data-i="' + i + '">삭제</button>') +
+      '<button class="btn primary" data-act="note-save" data-i="' + (i === null ? '' : i) + '">저장</button></div>');
+  }
+  function saveNote(i) {
+    var t = val('n-title').trim(), b = val('n-body').trim();
+    if (!t) return showErr('제목을 넣어 주세요.');
+    if (i === '') state.notes.push({ title: t, body: b }); else state.notes[+i] = { title: t, body: b };
+    save(); closeSheet(); render();
   }
   function drawMenus() {
     var box = document.getElementById('list');
     if (!box || !state.menus.length) return;
+    if (menuMode === 'recipe') { box.innerHTML = grouped('menus', state.menus, recipeCard); return; }
     box.innerHTML = grouped('menus', state.menus, function (m) {
       var r = Calc.evaluate(m, state.ingredients);
       return '<button class="card" data-act="menu-edit" data-id="' + m.id + '"><div class="row"><span class="name">' + esc(m.name) +
@@ -454,6 +508,8 @@
       '<label>판매가 (원)</label><input id="f-price" class="f" inputmode="decimal" value="' + esc(m.price) + '">' +
       '<label>들어가는 재료와 사용량</label><div id="rows"></div>' +
       '<button class="btn block" data-act="row-add">+ 재료 넣기</button>' +
+      '<label>만드는 법 (레시피북에 보여요)</label><textarea id="f-recipe" class="f" rows="4" placeholder="예: 샷 1 + 우유 180ml, 라떼아트">' +
+      esc(m.recipe || '') + '</textarea>' +
       '<div class="preview" id="m-prev"></div><div class="err" id="err"></div>' +
       '<div class="actions"><button class="btn" data-act="close">닫기</button>' +
       (isNew ? '' : '<button class="btn danger" data-act="menu-del" data-id="' + m.id + '">삭제</button>') +
@@ -502,7 +558,7 @@
     var m = null;
     if (id) state.menus.forEach(function (x) { if (x.id === id) m = x; });
     if (!m) { m = { id: newId() }; state.menus.push(m); }
-    m.name = name; m.price = price; m.cat = val('f-cat').trim(); m.items = editItems.map(function (it) { return { ingId: it.ingId, amount: it.amount }; });
+    m.name = name; m.price = price; m.cat = val('f-cat').trim(); m.recipe = val('f-recipe').trim(); m.items = editItems.map(function (it) { return { ingId: it.ingId, amount: it.amount }; });
     save(); closeSheet(); render();
   }
   function delMenu(id) {
@@ -542,7 +598,8 @@
         (keep ? '판매 기록 ' + Object.keys(state.sales).length + '일치는 그대로 남아요.'
               : '판매 기록도 파일의 ' + Object.keys(s.sales).length + '일치로 바뀌어요.') + ' 불러올까요?')) return;
       state = fill({ ingredients: s.ingredients, menus: s.menus,
-        sales: keep ? state.sales : s.sales, settings: keep ? state.settings : s.settings });
+        sales: keep ? state.sales : s.sales, settings: keep ? state.settings : s.settings,
+        notes: s.notes || state.notes });
       save(); render();
       alert('불러왔어요.');
     };
@@ -590,6 +647,13 @@
       case 'settings': settingsSheet(); break;
       case 'settings-save': saveSettings(); break;
       case 'closed': t.classList.toggle('on'); break;
+      case 'mode': menuMode = t.getAttribute('data-m'); render(); break;
+      case 'note-new': noteSheet(null); break;
+      case 'note-edit': noteSheet(Number(t.getAttribute('data-i'))); break;
+      case 'note-save': saveNote(t.getAttribute('data-i')); break;
+      case 'note-del':
+        if (confirm('이 기준 메모를 삭제할까요?')) { state.notes.splice(Number(t.getAttribute('data-i')), 1); save(); closeSheet(); render(); }
+        break;
       case 'cat':
         var key = t.getAttribute('data-key');
         filt[key].cat = t.getAttribute('data-cat');
