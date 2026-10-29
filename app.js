@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 6;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 7;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -71,6 +71,7 @@
     else if (tab === 'menus') renderMenus();
     else if (tab === 'sales') renderSales();
     else if (tab === 'cal') renderCal();
+    else if (tab === 'recipes') renderRecipes();
     else renderBackup();
   }
 
@@ -327,7 +328,7 @@
 
   // ---------- 검색·분류 (메뉴·재료·판매 탭 공통) ----------
   var NOCAT = '분류 없음';
-  var filt = { menus: { q: '', cat: '' }, ings: { q: '', cat: '' }, sales: { q: '', cat: '' } };
+  var filt = { menus: { q: '', cat: '' }, ings: { q: '', cat: '' }, sales: { q: '', cat: '' }, recipes: { q: '', cat: '' } };
   function catOf(x) { return (x.cat || '').trim() || NOCAT; }
   function cats(list) {   // 처음 나온 순서대로 (불러온 파일의 순서를 지킴), 분류 없음은 맨 뒤
     var out = [];
@@ -362,6 +363,7 @@
     if (tab === 'menus') drawMenus();
     else if (tab === 'ings') drawIngs();
     else if (tab === 'sales') drawSales();
+    else if (tab === 'recipes') drawRecipes();
   }
 
   function renderIngs() {
@@ -379,16 +381,25 @@
     });
   }
 
-  var menuMode = 'cost';   // 메뉴 탭: 'cost' 원가 보기 / 'recipe' 레시피북
   function renderMenus() {
-    var rec = menuMode === 'recipe';
-    view.innerHTML = '<div class="seg"><button data-act="mode" data-m="cost"' + (rec ? '' : ' class="on"') + '>원가</button>' +
-      '<button data-act="mode" data-m="recipe"' + (rec ? ' class="on"' : '') + '>📖 레시피북</button></div>' +
-      (rec ? notesHtml() : '<button class="btn primary block" data-act="menu-new">+ 메뉴 추가</button>' + exampleButton()) +
+    view.innerHTML = '<button class="btn primary block" data-act="menu-new">+ 메뉴 추가</button>' + exampleButton() +
       (state.menus.length ? controls('menus', state.menus, '메뉴 찾기 (예: 라떼)') : '') + '<div id="list"></div>' +
-      (state.menus.length && !rec ? '<p class="hint">조정 필요: 마진 ' + Calc.fmtWon(Calc.MARGIN_MIN) + '원 미만이면서 원가율 ' +
+      (state.menus.length ? '<p class="hint">조정 필요: 마진 ' + Calc.fmtWon(Calc.MARGIN_MIN) + '원 미만이면서 원가율 ' +
         Math.round(Calc.RATE_MAX * 100) + '% 초과일 때만 표시돼요.</p>' : '');
     drawMenus();
+  }
+  // 레시피 탭: 공통 기준 메모 + 메뉴별 만드는 법
+  function renderRecipes() {
+    var empty = !state.notes.length && !state.menus.some(function (m) { return m.recipe; });
+    view.innerHTML = (empty ? '<div class="empty">아직 레시피가 없어요.<br>레시피 파일을 받았다면 아래 버튼으로 불러오세요.' +
+        '<button class="btn primary block" data-act="import">레시피 파일 불러오기</button></div>' : '') +
+      notesHtml() +
+      (state.menus.length ? controls('recipes', state.menus, '레시피 찾기 (예: 라떼)') : '') + '<div id="list"></div>';
+    drawRecipes();
+  }
+  function drawRecipes() {
+    var box = document.getElementById('list');
+    if (box && state.menus.length) box.innerHTML = grouped('recipes', state.menus, recipeCard);
   }
   function notesHtml() {
     return '<div class="cathead">기본 기준 <small>' + state.notes.length + '</small></div>' +
@@ -421,7 +432,6 @@
   function drawMenus() {
     var box = document.getElementById('list');
     if (!box || !state.menus.length) return;
-    if (menuMode === 'recipe') { box.innerHTML = grouped('menus', state.menus, recipeCard); return; }
     box.innerHTML = grouped('menus', state.menus, function (m) {
       var r = Calc.evaluate(m, state.ingredients);
       return '<button class="card" data-act="menu-edit" data-id="' + m.id + '"><div class="row"><span class="name">' + esc(m.name) +
@@ -649,7 +659,6 @@
       case 'settings': settingsSheet(); break;
       case 'settings-save': saveSettings(); break;
       case 'closed': t.classList.toggle('on'); break;
-      case 'mode': menuMode = t.getAttribute('data-m'); render(); break;
       case 'note-new': noteSheet(null); break;
       case 'note-edit': noteSheet(Number(t.getAttribute('data-i'))); break;
       case 'note-save': saveNote(t.getAttribute('data-i')); break;
