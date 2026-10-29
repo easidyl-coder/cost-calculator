@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2f6f5e">
+<title>원가계산기</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<header class="top"><h1>원가계산기</h1></header>
+<nav class="tabs" id="tabs">
+  <button data-tab="menus" class="on">메뉴</button>
+  <button data-tab="ings">재료</button>
+  <button data-tab="backup">백업</button>
+</nav>
+<main id="view"></main>
+<div id="sheet" class="sheet" hidden></div>
+<input type="file" id="file" accept="application/json,.json" hidden>
+<script src="./calc.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
