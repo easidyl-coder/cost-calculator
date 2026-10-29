@@ -112,7 +112,7 @@
       '<label>포스 합계 (원, 할인 반영된 실제 매출)</label><input id="s-pos" class="f" inputmode="numeric" placeholder="비우면 메뉴 판매가로 계산" value="' +
       (Calc.isNum(r.posTotal) ? r.posTotal : '') + '">' +
       '<label>메모 (행사·단체 손님 등)</label><input id="s-memo" class="f" value="' + esc(r.memo || '') + '"></details>' +
-      '<input id="q" class="f search" placeholder="🔍 메뉴 찾기 (예: 라떼)" autocomplete="off">' +
+      controls('sales', state.menus, '메뉴 찾기 (예: 라떼)') +
       '<div id="mlist"></div>';
     drawSales();
   }
@@ -128,30 +128,26 @@
       (Calc.isNum(r.posTotal) && Math.round(r.posTotal) !== Math.round(s.menuSales)
         ? ' · 메뉴로 계산한 매출(' + Calc.fmtWon(s.menuSales) + '원)과 ' + Calc.fmtWon(Math.abs(r.posTotal - s.menuSales)) + '원 차이' : '') +
       '</div></div>';
-    var q = (document.getElementById('q').value || '').replace(/\s/g, '').toLowerCase();
     var qty = {};
     r.items.forEach(function (it) { qty[it.menuId] = it; });
     var pop = popularity();
-    var list = state.menus.slice().sort(function (a, b) {
-      var sa = qty[a.id] ? 1 : 0, sb = qty[b.id] ? 1 : 0;
-      return (sb - sa) || ((pop[b.id] || 0) - (pop[a.id] || 0));
+    // 분류 안에서는 자주 파는 메뉴가 위로 (분류 순서는 메뉴 탭과 같음)
+    var list = state.menus.slice().sort(function (a, b) { return (pop[b.id] || 0) - (pop[a.id] || 0); });
+    // 오늘 판 메뉴는 맨 위에 따로 (메뉴가 지워졌어도 그날 판 기록은 보여 줌)
+    var sold = r.items.map(function (it) {
+      return state.menus.filter(function (m) { return m.id === it.menuId; })[0] || { id: it.menuId, name: it.name, price: it.price, gone: true };
     });
-    // 메뉴가 지워졌어도 그날 판 기록은 보여 줌
-    r.items.forEach(function (it) {
-      if (!state.menus.some(function (m) { return m.id === it.menuId; })) list.unshift({ id: it.menuId, name: it.name, price: it.price, gone: true });
-    });
-    var h = '';
-    list.forEach(function (m) {
-      if (q && m.name.replace(/\s/g, '').toLowerCase().indexOf(q) < 0) return;
+    var h = sold.length ? '<div class="cathead">이날 판 메뉴 <small>' + sold.length + '</small></div>' + sold.map(saleRow).join('') : '';
+    box.innerHTML = h + grouped('sales', list, saleRow);
+    function saleRow(m) {
       var it = qty[m.id], n = it ? it.qty : 0;
       var cost = it ? it.cost : Calc.evaluate(m, state.ingredients).cost;
-      h += '<div class="srow' + (n ? ' sold' : '') + '"><div class="nm">' + esc(m.name) + (m.gone ? ' (지운 메뉴)' : '') +
+      return '<div class="srow' + (n ? ' sold' : '') + '"><div class="nm">' + esc(m.name) + (m.gone ? ' (지운 메뉴)' : '') +
         '<small>' + Calc.fmtWon(m.price) + '원 · 원가 ' + Calc.fmtWon(cost) + '원</small></div>' +
         '<button class="pm" data-act="minus" data-id="' + m.id + '"' + (n ? '' : ' disabled') + ' aria-label="하나 빼기">−</button>' +
         '<b class="qty">' + n + '</b>' +
         (m.gone ? '<span class="pm"></span>' : '<button class="pm plus" data-act="plus" data-id="' + m.id + '" aria-label="하나 더하기">+</button>') + '</div>';
-    });
-    box.innerHTML = h || '<p class="hint">찾는 메뉴가 없어요.</p>';
+    }
   }
   function changeQty(id, delta) {
     var r = dayRec(saleDate, true);
@@ -307,31 +303,84 @@
       '<button class="btn primary block" data-act="example">예시 자료 넣어 보기</button></div>';
   }
 
+  // ---------- 검색·분류 (메뉴·재료·판매 탭 공통) ----------
+  var NOCAT = '분류 없음';
+  var filt = { menus: { q: '', cat: '' }, ings: { q: '', cat: '' }, sales: { q: '', cat: '' } };
+  function catOf(x) { return (x.cat || '').trim() || NOCAT; }
+  function cats(list) {   // 처음 나온 순서대로 (불러온 파일의 순서를 지킴), 분류 없음은 맨 뒤
+    var out = [];
+    list.forEach(function (x) { var c = catOf(x); if (out.indexOf(c) < 0) out.push(c); });
+    out.sort(function (a, b) { return (a === NOCAT) - (b === NOCAT); });
+    return out;
+  }
+  function controls(key, list, placeholder) {
+    var f = filt[key], cs = cats(list);
+    if (f.cat && cs.indexOf(f.cat) < 0) f.cat = '';
+    return '<input id="q" class="f search" data-key="' + key + '" placeholder="🔍 ' + placeholder + '" autocomplete="off" value="' + esc(f.q) + '">' +
+      (cs.length > 1 ? '<div class="chips">' + [''].concat(cs).map(function (c) {
+        return '<button data-act="cat" data-key="' + key + '" data-cat="' + esc(c) + '"' + (f.cat === c ? ' class="on"' : '') + '>' + esc(c || '전체') + '</button>';
+      }).join('') + '</div>' : '');
+  }
+  function match(key, x) {
+    var f = filt[key], q = f.q.replace(/\s/g, '').toLowerCase();
+    if (f.cat && catOf(x) !== f.cat) return false;
+    return !q || (x.name + ' ' + (x.cat || '')).replace(/\s/g, '').toLowerCase().indexOf(q) >= 0;
+  }
+  function grouped(key, list, row) {   // 분류 제목을 붙여 줄 세우기
+    var h = '', shown = 0;
+    cats(list).forEach(function (c) {
+      var part = list.filter(function (x) { return catOf(x) === c && match(key, x); });
+      if (!part.length) return;
+      h += '<div class="cathead">' + esc(c) + ' <small>' + part.length + '</small></div>';
+      part.forEach(function (x) { h += row(x); shown++; });
+    });
+    return shown ? h : '<p class="hint">찾는 것이 없어요.</p>';
+  }
+  function drawList() {
+    if (tab === 'menus') drawMenus();
+    else if (tab === 'ings') drawIngs();
+    else if (tab === 'sales') drawSales();
+  }
+
   function renderIngs() {
-    var h = '<button class="btn primary block" data-act="ing-new">+ 재료 추가</button>' + exampleButton();
-    state.ingredients.forEach(function (g) {
-      h += '<button class="card" data-act="ing-edit" data-id="' + g.id + '"><div class="row"><span class="name">' + esc(g.name) +
+    view.innerHTML = '<button class="btn primary block" data-act="ing-new">+ 재료 추가</button>' + exampleButton() +
+      (state.ingredients.length ? controls('ings', state.ingredients, '재료 찾기') : '') + '<div id="list"></div>';
+    drawIngs();
+  }
+  function drawIngs() {
+    var box = document.getElementById('list');
+    if (!box || !state.ingredients.length) return;
+    box.innerHTML = grouped('ings', state.ingredients, function (g) {
+      return '<button class="card" data-act="ing-edit" data-id="' + g.id + '"><div class="row"><span class="name">' + esc(g.name) +
         '</span><span>1' + g.unit + '당 ' + Calc.fmtUnitCost(Calc.unitCost(g)) + '원</span></div>' +
         '<div class="sub">' + Calc.fmtWon(g.price) + '원 / ' + g.qty.toLocaleString('ko-KR') + g.unit + '</div></button>';
     });
-    view.innerHTML = h;
   }
 
   function renderMenus() {
-    var h = '<button class="btn primary block" data-act="menu-new">+ 메뉴 추가</button>' + exampleButton();
-    state.menus.forEach(function (m) {
+    view.innerHTML = '<button class="btn primary block" data-act="menu-new">+ 메뉴 추가</button>' + exampleButton() +
+      (state.menus.length ? controls('menus', state.menus, '메뉴 찾기 (예: 라떼)') : '') + '<div id="list"></div>' +
+      (state.menus.length ? '<p class="hint">조정 필요: 마진 ' + Calc.fmtWon(Calc.MARGIN_MIN) + '원 미만이면서 원가율 ' +
+        Math.round(Calc.RATE_MAX * 100) + '% 초과일 때만 표시돼요.</p>' : '');
+    drawMenus();
+  }
+  function drawMenus() {
+    var box = document.getElementById('list');
+    if (!box || !state.menus.length) return;
+    box.innerHTML = grouped('menus', state.menus, function (m) {
       var r = Calc.evaluate(m, state.ingredients);
-      h += '<button class="card" data-act="menu-edit" data-id="' + m.id + '"><div class="row"><span class="name">' + esc(m.name) +
+      return '<button class="card" data-act="menu-edit" data-id="' + m.id + '"><div class="row"><span class="name">' + esc(m.name) +
         '</span><span>' + Calc.fmtWon(m.price) + '원</span></div>' +
         '<div class="grid"><div>원가<b>' + Calc.fmtWon(r.cost) + '원</b></div><div>마진<b>' + Calc.fmtWon(r.margin) +
         '원</b></div><div>원가율<b>' + Calc.fmtPct(r.rate) + '</b></div></div>' +
         '<div style="margin-top:8px">' + verdictBadge(r.verdict) + '</div></button>';
     });
-    if (state.menus.length) {
-      h += '<p class="hint">조정 필요: 마진 ' + Calc.fmtWon(Calc.MARGIN_MIN) + '원 미만이면서 원가율 ' +
-        Math.round(Calc.RATE_MAX * 100) + '% 초과일 때만 표시돼요.</p>';
-    }
-    view.innerHTML = h;
+  }
+  function catField(list, cur) {   // 분류 입력칸 + 이미 쓰는 분류 고르기
+    return '<label>분류 (예: 커피, 베이커리)</label><input id="f-cat" class="f" list="cat-list" value="' + esc(cur || '') + '" placeholder="비워도 돼요">' +
+      '<datalist id="cat-list">' + cats(list).filter(function (c) { return c !== NOCAT; }).map(function (c) {
+        return '<option value="' + esc(c) + '">';
+      }).join('') + '</datalist>';
   }
 
   function renderBackup() {
@@ -356,6 +405,7 @@
     var opts = Calc.UNITS.map(function (u) { return '<option' + (u === g.unit ? ' selected' : '') + '>' + u + '</option>'; }).join('');
     openSheet('<h2>' + (isNew ? '재료 추가' : '재료 수정') + '</h2>' +
       '<label>이름</label><input id="f-name" class="f" value="' + esc(g.name) + '" placeholder="예: 우유">' +
+      catField(state.ingredients, g.cat) +
       '<div class="two"><div><label>구매가 (원)</label><input id="f-price" class="f" inputmode="decimal" value="' + esc(g.price) + '"></div>' +
       '<div><label>구매 용량</label><input id="f-qty" class="f" inputmode="decimal" value="' + esc(g.qty) + '"></div></div>' +
       '<label>단위</label><select id="f-unit" class="f">' + opts + '</select>' +
@@ -379,7 +429,7 @@
     if (!Calc.isNum(qty) || qty <= 0) return showErr('구매 용량을 0보다 큰 숫자로 입력해 주세요.');
     var g = id ? findIng(id) : null;
     if (!g) { g = { id: newId() }; state.ingredients.push(g); }
-    g.name = name; g.price = price; g.qty = qty; g.unit = val('f-unit');
+    g.name = name; g.price = price; g.qty = qty; g.unit = val('f-unit'); g.cat = val('f-cat').trim();
     save(); closeSheet(); render();
   }
   function delIng(id) {
@@ -400,6 +450,7 @@
     editItems = m.items.map(function (it) { return { ingId: it.ingId, amount: it.amount }; });
     openSheet('<h2>' + (isNew ? '메뉴 추가' : '메뉴 수정') + '</h2>' +
       '<label>이름</label><input id="f-name" class="f" value="' + esc(m.name) + '" placeholder="예: 카페라떼">' +
+      catField(state.menus, m.cat) +
       '<label>판매가 (원)</label><input id="f-price" class="f" inputmode="decimal" value="' + esc(m.price) + '">' +
       '<label>들어가는 재료와 사용량</label><div id="rows"></div>' +
       '<button class="btn block" data-act="row-add">+ 재료 넣기</button>' +
@@ -451,7 +502,7 @@
     var m = null;
     if (id) state.menus.forEach(function (x) { if (x.id === id) m = x; });
     if (!m) { m = { id: newId() }; state.menus.push(m); }
-    m.name = name; m.price = price; m.items = editItems.map(function (it) { return { ingId: it.ingId, amount: it.amount }; });
+    m.name = name; m.price = price; m.cat = val('f-cat').trim(); m.items = editItems.map(function (it) { return { ingId: it.ingId, amount: it.amount }; });
     save(); closeSheet(); render();
   }
   function delMenu(id) {
@@ -539,6 +590,12 @@
       case 'settings': settingsSheet(); break;
       case 'settings-save': saveSettings(); break;
       case 'closed': t.classList.toggle('on'); break;
+      case 'cat':
+        var key = t.getAttribute('data-key');
+        filt[key].cat = t.getAttribute('data-cat');
+        var chips = t.parentNode.querySelectorAll('button');
+        for (var ci = 0; ci < chips.length; ci++) chips[ci].className = chips[ci] === t ? 'on' : '';
+        drawList(); break;
     }
   });
   // 판매 탭의 포스 합계·메모는 입력을 마치면 저장
@@ -555,7 +612,7 @@
     dropIfEmpty(saleDate); save(); drawSales();
   });
   document.addEventListener('input', function (e) {
-    if (e.target.id === 'q') { drawSales(); return; }
+    if (e.target.id === 'q') { filt[e.target.getAttribute('data-key')].q = e.target.value; drawList(); return; }
     if (sheet.hidden) return;
     if (document.getElementById('f-unitcost')) updateUnitCost();
     else if (document.getElementById('m-prev')) {

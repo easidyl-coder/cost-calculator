@@ -1,5 +1,5 @@
 // 파일을 고쳤으면 아래 버전 문자열을 바꿔야 휴대폰이 새 파일을 받는다 (한 곳)
-const VERSION = 'wongagesan-v2';
+const VERSION = 'wongagesan-v3';
 const FILES = ['./', './index.html', './style.css', './calc.js', './app.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {

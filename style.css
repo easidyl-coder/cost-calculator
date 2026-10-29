@@ -41,6 +41,11 @@ label { display: block; margin-top: 12px; font-weight: 600; font-size: 15px; }
 .actions { display: flex; gap: 8px; margin-top: 16px; }
 .actions .btn { flex: 1; }
 .tabs button { padding: 0 2px; }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 6px; -webkit-overflow-scrolling: touch; }
+.chips button { flex: none; min-height: 40px; padding: 0 14px; border: 1px solid #ccc; border-radius: 999px; background: #fff; color: #444; font-size: 15px; }
+.chips button.on { background: #2f6f5e; border-color: #2f6f5e; color: #fff; font-weight: 700; }
+.cathead { margin: 16px 2px 4px; font-weight: 700; color: #2f6f5e; border-bottom: 2px solid #d6e5df; padding-bottom: 4px; }
+.cathead small { color: #888; font-weight: 400; }
 .btn.slim { min-height: 40px; }
 .pos { color: #2e7d32; }
 .neg { color: #c62828; }
