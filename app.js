@@ -2,6 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
+  var APP_VER = 6;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -443,7 +444,8 @@
       '<button class="btn primary block" data-act="export">내보내기 (파일로 저장)</button>' +
       '<button class="btn block" data-act="import">불러오기 (파일 선택)</button>' +
       '<button class="btn block" data-act="export-csv">하루 정리 엑셀(CSV)로 받기</button>' +
-      '<p class="hint">판매 기록 ' + Object.keys(state.sales).length + '일치가 저장돼 있어요.</p>';
+      '<p class="hint">판매 기록 ' + Object.keys(state.sales).length + '일치가 저장돼 있어요.</p>' +
+      '<p class="hint">앱 버전 ' + APP_VER + '</p>';
   }
 
   // ---------- 아래에서 올라오는 입력창 ----------
@@ -687,6 +689,12 @@
 
   render();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js').catch(function () {});
+    // 새 판이 설치되면 한 번만 저절로 새로고침 (옛 화면에 머물지 않게)
+    var hadController = !!navigator.serviceWorker.controller, reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadController || reloaded) return;
+      reloaded = true; location.reload();
+    });
+    navigator.serviceWorker.register('./sw.js').then(function (reg) { reg.update(); }).catch(function () {});
   }
 })();

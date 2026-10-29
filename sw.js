@@ -1,5 +1,6 @@
-// 파일을 고쳤으면 아래 버전 문자열을 바꿔야 휴대폰이 새 파일을 받는다 (한 곳)
-const VERSION = 'wongagesan-v5';
+// 파일을 고쳤으면 아래 버전 문자열을 바꾼다 (한 곳). app.js 의 APP_VER 도 같이 올린다.
+// 인터넷이 되면 항상 새 파일을 받고(받은 것은 저장), 인터넷이 안 되면 저장해 둔 파일을 쓴다.
+const VERSION = 'wongagesan-v6';
 const FILES = ['./', './index.html', './style.css', './calc.js', './app.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -15,6 +16,16 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || fetch(e.request)));
+  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
+  e.respondWith(
+    fetch(e.request, { cache: 'no-cache' })
+      .then((res) => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(VERSION).then((c) => c.put(e.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request, { ignoreSearch: true }))
+  );
 });
