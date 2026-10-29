@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 8;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 9;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -632,6 +632,16 @@
     ];
     save(); render();
   }
+  // 새로고침: 저장해 둔 앱 파일(자료 아님)을 비우고 새 판을 받아 다시 연다. 재료·메뉴·판매 기록은 그대로
+  function hardReload() {
+    var done = function () { location.reload(); };
+    var jobs = [];
+    if (window.caches) jobs.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+    if (navigator.serviceWorker) jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+      return Promise.all(rs.map(function (r) { return r.update(); }));
+    }));
+    Promise.all(jobs).then(done, done);
+  }
   function exportData() {
     download('원가계산기_백업_' + ymd(new Date()) + '.json', JSON.stringify(state, null, 2), 'application/json');
   }
@@ -697,6 +707,7 @@
       case 'settings': settingsSheet(); break;
       case 'settings-save': saveSettings(); break;
       case 'closed': t.classList.toggle('on'); break;
+      case 'reload': hardReload(); break;
       case 'recipe-all': recipeAll = t.checked; drawRecipes(); break;
       case 'note-new': noteSheet(null); break;
       case 'note-edit': noteSheet(Number(t.getAttribute('data-i'))); break;
