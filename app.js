@@ -5,15 +5,37 @@
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
-  var tab = 'menus';
   var state = load();
+  var tab = state.menus.length ? 'sales' : 'menus';
+  var saleDate = ymd(new Date());          // 판매 탭에서 보고 있는 날
+  var calMonth = saleDate.slice(0, 7);     // 달력 탭에서 보고 있는 달 (YYYY-MM)
+  var DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  var WEATHER = ['☀️', '⛅', '🌧️', '❄️'];
 
   function load() {
+    var s = null;
     try {
-      var s = JSON.parse(localStorage.getItem(KEY));
-      if (Calc.validateData(s)) return s;
-    } catch (e) {}
-    return { ingredients: [], menus: [] };
+      s = JSON.parse(localStorage.getItem(KEY));
+      if (!Calc.validateData(s)) s = null;
+    } catch (e) { s = null; }
+    return fill(s || { ingredients: [], menus: [] });
+  }
+  function fill(s) {
+    s.sales = s.sales || {};
+    s.settings = s.settings || {};
+    s.settings.fixed = s.settings.fixed || {};
+    s.settings.closed = s.settings.closed || [0];   // 쉬는 요일 (0=일). 처음엔 일요일
+    return s;
+  }
+  function ymd(d) {
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function parseYmd(s) { var a = s.split('-'); return new Date(+a[0], +a[1] - 1, +a[2]); }
+  function addDays(s, n) { var d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); }
+  function man(n) {   // 화면이 좁은 달력용: 12,345 → 1.2만
+    if (Math.abs(n) < 10000) return Calc.fmtWon(n);
+    return (Math.round(n / 1000) / 10).toLocaleString('ko-KR') + '만';
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -45,7 +67,238 @@
     for (var i = 0; i < btns.length; i++) btns[i].className = btns[i].getAttribute('data-tab') === tab ? 'on' : '';
     if (tab === 'ings') renderIngs();
     else if (tab === 'menus') renderMenus();
+    else if (tab === 'sales') renderSales();
+    else if (tab === 'cal') renderCal();
     else renderBackup();
+  }
+
+  // ---------- 판매 (하루 판 메뉴 개수 넣기) ----------
+  function dayRec(d, make) {
+    if (!state.sales[d] && make) state.sales[d] = { items: [], memo: '', weather: '', posTotal: null };
+    return state.sales[d] || null;
+  }
+  function dropIfEmpty(d) {
+    var r = state.sales[d];
+    if (r && !r.items.length && !r.memo && !r.weather && !Calc.isNum(r.posTotal)) delete state.sales[d];
+  }
+  function popularity() {   // 메뉴별로 지금까지 판 개수 (자주 파는 메뉴를 위로)
+    var c = {};
+    Object.keys(state.sales).forEach(function (d) {
+      state.sales[d].items.forEach(function (it) { c[it.menuId] = (c[it.menuId] || 0) + it.qty; });
+    });
+    return c;
+  }
+  function dateLabel(d) {
+    var x = parseYmd(d);
+    return (x.getMonth() + 1) + '월 ' + x.getDate() + '일 (' + DOW[x.getDay()] + ')';
+  }
+  function renderSales() {
+    if (!state.menus.length) {
+      view.innerHTML = '<div class="empty">먼저 메뉴 탭에서 메뉴를 만들어 주세요.<br>판매한 개수를 넣으면 하루에 얼마 벌었는지 계산해 드려요.</div>';
+      return;
+    }
+    var r = dayRec(saleDate, false) || { memo: '', weather: '', posTotal: null };
+    var today = ymd(new Date());
+    view.innerHTML =
+      '<div class="datebar"><button class="nav" data-act="day-prev" aria-label="전날">‹</button>' +
+      '<b>' + dateLabel(saleDate) + '</b>' +
+      '<button class="nav" data-act="day-next" aria-label="다음날">›</button></div>' +
+      (saleDate !== today ? '<button class="btn block slim" data-act="day-today">오늘로 가기</button>' : '') +
+      '<div id="sum"></div>' +
+      '<div class="weather">' + WEATHER.map(function (w) {
+        return '<button data-act="weather" data-w="' + w + '"' + (r.weather === w ? ' class="on"' : '') + '>' + w + '</button>';
+      }).join('') + '</div>' +
+      '<details class="more"' + (r.memo || Calc.isNum(r.posTotal) ? ' open' : '') + '><summary>포스 합계·메모</summary>' +
+      '<label>포스 합계 (원, 할인 반영된 실제 매출)</label><input id="s-pos" class="f" inputmode="numeric" placeholder="비우면 메뉴 판매가로 계산" value="' +
+      (Calc.isNum(r.posTotal) ? r.posTotal : '') + '">' +
+      '<label>메모 (행사·단체 손님 등)</label><input id="s-memo" class="f" value="' + esc(r.memo || '') + '"></details>' +
+      '<input id="q" class="f search" placeholder="🔍 메뉴 찾기 (예: 라떼)" autocomplete="off">' +
+      '<div id="mlist"></div>';
+    drawSales();
+  }
+  function drawSales() {
+    var box = document.getElementById('mlist');
+    if (!box) return;
+    var r = dayRec(saleDate, false) || { items: [] };
+    var s = Calc.daySummary(r);
+    document.getElementById('sum').innerHTML =
+      '<div class="card sum"><div class="grid"><div>매출<b>' + Calc.fmtWon(s.sales) + '원</b></div><div>원가<b>' +
+      Calc.fmtWon(s.cost) + '원</b></div><div>번 돈<b class="' + (s.profit < 0 ? 'neg' : 'pos') + '">' + Calc.fmtWon(s.profit) + '원</b></div></div>' +
+      '<div class="sub">' + s.cups + '개 판매 · 원가율 ' + Calc.fmtPct(s.rate) +
+      (Calc.isNum(r.posTotal) && Math.round(r.posTotal) !== Math.round(s.menuSales)
+        ? ' · 메뉴로 계산한 매출(' + Calc.fmtWon(s.menuSales) + '원)과 ' + Calc.fmtWon(Math.abs(r.posTotal - s.menuSales)) + '원 차이' : '') +
+      '</div></div>';
+    var q = (document.getElementById('q').value || '').replace(/\s/g, '').toLowerCase();
+    var qty = {};
+    r.items.forEach(function (it) { qty[it.menuId] = it; });
+    var pop = popularity();
+    var list = state.menus.slice().sort(function (a, b) {
+      var sa = qty[a.id] ? 1 : 0, sb = qty[b.id] ? 1 : 0;
+      return (sb - sa) || ((pop[b.id] || 0) - (pop[a.id] || 0));
+    });
+    // 메뉴가 지워졌어도 그날 판 기록은 보여 줌
+    r.items.forEach(function (it) {
+      if (!state.menus.some(function (m) { return m.id === it.menuId; })) list.unshift({ id: it.menuId, name: it.name, price: it.price, gone: true });
+    });
+    var h = '';
+    list.forEach(function (m) {
+      if (q && m.name.replace(/\s/g, '').toLowerCase().indexOf(q) < 0) return;
+      var it = qty[m.id], n = it ? it.qty : 0;
+      var cost = it ? it.cost : Calc.evaluate(m, state.ingredients).cost;
+      h += '<div class="srow' + (n ? ' sold' : '') + '"><div class="nm">' + esc(m.name) + (m.gone ? ' (지운 메뉴)' : '') +
+        '<small>' + Calc.fmtWon(m.price) + '원 · 원가 ' + Calc.fmtWon(cost) + '원</small></div>' +
+        '<button class="pm" data-act="minus" data-id="' + m.id + '"' + (n ? '' : ' disabled') + ' aria-label="하나 빼기">−</button>' +
+        '<b class="qty">' + n + '</b>' +
+        (m.gone ? '<span class="pm"></span>' : '<button class="pm plus" data-act="plus" data-id="' + m.id + '" aria-label="하나 더하기">+</button>') + '</div>';
+    });
+    box.innerHTML = h || '<p class="hint">찾는 메뉴가 없어요.</p>';
+  }
+  function changeQty(id, delta) {
+    var r = dayRec(saleDate, true);
+    var it = r.items.filter(function (x) { return x.menuId === id; })[0];
+    var m = state.menus.filter(function (x) { return x.id === id; })[0];
+    if (!it) {
+      if (delta < 0 || !m) return;
+      it = { menuId: id, name: m.name, price: m.price, cost: 0, qty: 0 };
+      r.items.push(it);
+    }
+    if (m) {   // 판매가·원가는 넣는 순간의 값으로 저장 (나중에 메뉴를 고쳐도 지난 기록은 그대로)
+      it.name = m.name; it.price = m.price; it.cost = Calc.evaluate(m, state.ingredients).cost;
+    }
+    it.qty = Math.max(0, it.qty + delta);
+    if (!it.qty) r.items = r.items.filter(function (x) { return x !== it; });
+    dropIfEmpty(saleDate);
+    save(); drawSales();
+  }
+
+  // ---------- 달력 ----------
+  function monthDays(ym) {
+    var a = ym.split('-'), n = new Date(+a[0], +a[1], 0).getDate(), out = [];
+    for (var i = 1; i <= n; i++) out.push(ym + '-' + String(i).padStart(2, '0'));
+    return out;
+  }
+  function renderCal() {
+    var days = monthDays(calMonth), today = ymd(new Date());
+    var closed = state.settings.closed, fixed = Calc.fixedTotal(state.settings.fixed);
+    var tot = { sales: 0, cost: 0, profit: 0 }, sold = 0, best = null, sums = {}, byDow = {}, menus = {};
+    days.forEach(function (d) {
+      var r = state.sales[d];
+      if (!r || (!r.items.length && !Calc.isNum(r.posTotal))) return;
+      var s = Calc.daySummary(r);
+      sums[d] = s; sold++;
+      tot.sales += s.sales; tot.cost += s.cost; tot.profit += s.profit;
+      if (!best || s.profit > sums[best].profit) best = d;
+      var w = parseYmd(d).getDay();
+      byDow[w] = byDow[w] || { n: 0, p: 0 }; byDow[w].n++; byDow[w].p += s.profit;
+      r.items.forEach(function (it) {
+        var k = it.name;
+        menus[k] = menus[k] || { qty: 0, profit: 0 };
+        menus[k].qty += it.qty; menus[k].profit += (it.price - it.cost) * it.qty;
+      });
+    });
+    var openDays = days.filter(function (d) { return closed.indexOf(parseYmd(d).getDay()) < 0; }).length;
+    var maxP = 0;
+    Object.keys(sums).forEach(function (d) { maxP = Math.max(maxP, sums[d].profit); });
+    var a = calMonth.split('-');
+    var h = '<div class="datebar"><button class="nav" data-act="mon-prev" aria-label="전달">‹</button><b>' +
+      a[0] + '년 ' + (+a[1]) + '월</b><button class="nav" data-act="mon-next" aria-label="다음달">›</button></div>';
+    // 달력 칸
+    h += '<div class="cal">' + DOW.map(function (w, i) { return '<div class="dow' + (i === 0 ? ' sun' : '') + '">' + w + '</div>'; }).join('');
+    for (var i = 0; i < parseYmd(days[0]).getDay(); i++) h += '<div></div>';
+    days.forEach(function (d) {
+      var s = sums[d], r = state.sales[d], off = closed.indexOf(parseYmd(d).getDay()) >= 0;
+      var lv = s && maxP > 0 && s.profit > 0 ? Math.min(4, Math.ceil(s.profit / maxP * 4)) : 0;
+      h += '<button class="day lv' + lv + (off ? ' off' : '') + (d === today ? ' today' : '') + '" data-act="cal-day" data-d="' + d + '">' +
+        '<span class="dn">' + (+d.slice(8)) + (r && r.weather ? ' ' + r.weather : '') + '</span>' +
+        (s ? '<span class="dp' + (s.profit < 0 ? ' neg' : '') + '">' + man(s.profit) + '</span>' : (off ? '<span class="dp">쉼</span>' : '')) + '</button>';
+    });
+    h += '</div><p class="hint">칸 안 숫자는 그날 번 돈이에요. 날짜를 누르면 그날 판매를 넣거나 고칠 수 있어요.</p>';
+    // 한 달 정리
+    var left = tot.profit - fixed;
+    h += '<div class="card"><div class="name">이번 달 정리</div><div class="grid"><div>매출<b>' + man(tot.sales) + '</b></div><div>원가<b>' +
+      man(tot.cost) + '</b></div><div>번 돈<b class="pos">' + man(tot.profit) + '</b></div></div>' +
+      '<div class="sub">판매 기록 ' + sold + '일 / 영업일 ' + openDays + '일' + (sold ? ' · 하루 평균 번 돈 ' + Calc.fmtWon(tot.profit / sold) + '원' : '') +
+      (best ? ' · 가장 많이 번 날 ' + (+best.slice(5, 7)) + '/' + (+best.slice(8)) + ' (' + Calc.fmtWon(sums[best].profit) + '원)' : '') + '</div>';
+    if (fixed > 0) {
+      var pct = Math.max(0, Math.min(100, tot.profit / fixed * 100));
+      h += '<div class="fixedbox"><div class="row"><span>고정비 ' + Calc.fmtWon(fixed) + '원 채운 정도</span><b>' + Math.floor(pct) + '%</b></div>' +
+        '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
+        '<div class="sub">' + (left >= 0 ? '고정비를 빼고 <b class="pos">' + Calc.fmtWon(left) + '원</b> 남았어요.' :
+          '고정비까지 <b class="neg">' + Calc.fmtWon(-left) + '원</b> 더 벌어야 해요.') +
+        (openDays ? ' 고정비를 채우려면 영업일마다 평균 <b>' + Calc.fmtWon(fixed / openDays) + '원</b>을 벌어야 해요.' : '') + '</div></div>';
+    } else {
+      h += '<p class="hint">월세·인건비 같은 고정비를 넣으면, 고정비를 빼고 얼마 남는지도 보여 드려요.</p>';
+    }
+    h += '<button class="btn block" data-act="settings">고정비·쉬는 요일 설정</button></div>';
+    // 요일별 평균
+    var dowKeys = Object.keys(byDow);
+    if (dowKeys.length) {
+      var maxD = 0;
+      dowKeys.forEach(function (k) { maxD = Math.max(maxD, byDow[k].p / byDow[k].n); });
+      h += '<div class="card"><div class="name">요일별 하루 평균 번 돈</div>';
+      [1, 2, 3, 4, 5, 6, 0].forEach(function (k) {
+        if (!byDow[k]) return;
+        var v = byDow[k].p / byDow[k].n;
+        h += '<div class="hbar"><span>' + DOW[k] + '</span><div class="bar"><i style="width:' + (maxD > 0 ? Math.max(0, v / maxD * 100) : 0) + '%"></i></div><b>' + man(v) + '</b></div>';
+      });
+      h += '</div>';
+    }
+    // 많이 판 메뉴
+    var names = Object.keys(menus).sort(function (x, y) { return menus[y].qty - menus[x].qty; }).slice(0, 7);
+    if (names.length) {
+      h += '<div class="card"><div class="name">이번 달 많이 판 메뉴</div><table class="tbl"><tr><th>메뉴</th><th>개수</th><th>번 돈</th></tr>' +
+        names.map(function (n) { return '<tr><td>' + esc(n) + '</td><td>' + menus[n].qty + '</td><td>' + Calc.fmtWon(menus[n].profit) + '</td></tr>'; }).join('') +
+        '</table></div>';
+    }
+    h += '<p class="hint">번 돈 = 매출 − 원가(재료·포장 등 메뉴에 넣은 것). 고정비는 위 "이번 달 정리"에서만 빼요.</p>';
+    view.innerHTML = h;
+  }
+  function settingsSheet() {
+    var f = state.settings.fixed, c = state.settings.closed;
+    var inp = function (id, label, v) {
+      return '<label>' + label + '</label><input id="' + id + '" class="f" inputmode="numeric" value="' + (Calc.isNum(v) ? v : '') + '" placeholder="0">';
+    };
+    openSheet('<h2>고정비·쉬는 요일</h2><p class="hint">한 달에 나가는 돈 (원). 모르는 칸은 비워 두세요.</p>' +
+      inp('x-rent', '월세·관리비', f.rent) + inp('x-labor', '인건비', f.labor) + inp('x-util', '전기·가스·수도·인터넷', f.util) + inp('x-etc', '그 밖 (카드 수수료·포스 사용료 등)', f.etc) +
+      '<label>쉬는 요일</label><div class="weather">' + DOW.map(function (w, i) {
+        return '<button data-act="closed" data-i="' + i + '"' + (c.indexOf(i) >= 0 ? ' class="on"' : '') + '>' + w + '</button>';
+      }).join('') + '</div>' +
+      '<div class="err" id="err"></div><div class="actions"><button class="btn" data-act="close">닫기</button>' +
+      '<button class="btn primary" data-act="settings-save">저장</button></div>');
+  }
+  function saveSettings() {
+    var f = {}, bad = false;
+    [['rent', 'x-rent'], ['labor', 'x-labor'], ['util', 'x-util'], ['etc', 'x-etc']].forEach(function (p) {
+      var v = val(p[1]).trim();
+      if (v === '') return;
+      var n = parseNum(v);
+      if (!Calc.isNum(n) || n < 0) bad = true; else f[p[0]] = n;
+    });
+    if (bad) return showErr('금액은 0 이상의 숫자로 넣어 주세요.');
+    var c = [];
+    var bs = sheet.querySelectorAll('[data-act="closed"].on');
+    for (var i = 0; i < bs.length; i++) c.push(Number(bs[i].getAttribute('data-i')));
+    state.settings.fixed = f; state.settings.closed = c;
+    save(); closeSheet(); render();
+  }
+  function exportCsv() {
+    var rows = [['날짜', '요일', '날씨', '매출', '원가', '번 돈', '원가율(%)', '판매 개수', '메모']];
+    Object.keys(state.sales).sort().forEach(function (d) {
+      var r = state.sales[d], s = Calc.daySummary(r);
+      rows.push([d, DOW[parseYmd(d).getDay()], r.weather || '', Math.round(s.sales), Math.round(s.cost), Math.round(s.profit),
+        s.rate === null ? '' : Math.round(s.rate * 1000) / 10, s.cups, r.memo || '']);
+    });
+    var text = '﻿' + rows.map(function (r) {
+      return r.map(function (c) { c = String(c); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(',');
+    }).join('\r\n');
+    download('원가계산기_하루정리_' + ymd(new Date()) + '.csv', text, 'text/csv');
+  }
+  function download(name, text, type) {
+    var blob = new Blob([text], { type: type });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
   function exampleButton() {
@@ -82,10 +335,12 @@
   }
 
   function renderBackup() {
-    view.innerHTML = '<p class="hint">입력한 재료·메뉴는 이 휴대폰 안에만 저장돼요. 서버로 보내지 않아요. ' +
+    view.innerHTML = '<p class="hint">입력한 재료·메뉴·판매 기록은 이 휴대폰 안에만 저장돼요. 서버로 보내지 않아요. ' +
       '휴대폰을 바꾸거나 앱을 지우기 전에 내보내기로 파일을 따로 보관해 두세요.</p>' +
       '<button class="btn primary block" data-act="export">내보내기 (파일로 저장)</button>' +
-      '<button class="btn block" data-act="import">불러오기 (파일 선택)</button>';
+      '<button class="btn block" data-act="import">불러오기 (파일 선택)</button>' +
+      '<button class="btn block" data-act="export-csv">하루 정리 엑셀(CSV)로 받기</button>' +
+      '<p class="hint">판매 기록 ' + Object.keys(state.sales).length + '일치가 저장돼 있어요.</p>';
   }
 
   // ---------- 아래에서 올라오는 입력창 ----------
@@ -221,14 +476,7 @@
     save(); render();
   }
   function exportData() {
-    var d = new Date();
-    var p = function (n) { return String(n).padStart(2, '0'); };
-    var name = '원가계산기_백업_' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '.json';
-    var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    download('원가계산기_백업_' + ymd(new Date()) + '.json', JSON.stringify(state, null, 2), 'application/json');
   }
   function importData(file) {
     var rd = new FileReader();
@@ -236,9 +484,14 @@
       var s;
       try { s = JSON.parse(rd.result); } catch (e) { s = null; }
       if (!Calc.validateData(s)) { alert('이 파일은 원가계산기 백업 파일이 아니에요. 불러오지 않았어요.'); return; }
+      // 판매 기록이 없는 파일(재료·메뉴만)이면 지금 판매 기록과 설정은 그대로 둔다
+      var keep = s.sales === undefined;
       if (!confirm('지금 들어 있는 재료 ' + state.ingredients.length + '개·메뉴 ' + state.menus.length +
-        '개가 모두 지워지고, 파일의 재료 ' + s.ingredients.length + '개·메뉴 ' + s.menus.length + '개로 바뀌어요. 불러올까요?')) return;
-      state = { ingredients: s.ingredients, menus: s.menus };
+        '개가 모두 지워지고, 파일의 재료 ' + s.ingredients.length + '개·메뉴 ' + s.menus.length + '개로 바뀌어요.\n' +
+        (keep ? '판매 기록 ' + Object.keys(state.sales).length + '일치는 그대로 남아요.'
+              : '판매 기록도 파일의 ' + Object.keys(s.sales).length + '일치로 바뀌어요.') + ' 불러올까요?')) return;
+      state = fill({ ingredients: s.ingredients, menus: s.menus,
+        sales: keep ? state.sales : s.sales, settings: keep ? state.settings : s.settings });
       save(); render();
       alert('불러왔어요.');
     };
@@ -268,9 +521,41 @@
       case 'close': closeSheet(); break;
       case 'export': exportData(); break;
       case 'import': fileInput.value = ''; fileInput.click(); break;
+      case 'export-csv': exportCsv(); break;
+      case 'plus': changeQty(id, 1); break;
+      case 'minus': changeQty(id, -1); break;
+      case 'day-prev': saleDate = addDays(saleDate, -1); render(); break;
+      case 'day-next': saleDate = addDays(saleDate, 1); render(); break;
+      case 'day-today': saleDate = ymd(new Date()); render(); break;
+      case 'weather':
+        var r = dayRec(saleDate, true), w = t.getAttribute('data-w');
+        r.weather = r.weather === w ? '' : w;
+        dropIfEmpty(saleDate); save(); render(); break;
+      case 'mon-prev': case 'mon-next':
+        var d = parseYmd(calMonth + '-01');
+        d.setMonth(d.getMonth() + (t.getAttribute('data-act') === 'mon-prev' ? -1 : 1));
+        calMonth = ymd(d).slice(0, 7); render(); break;
+      case 'cal-day': saleDate = t.getAttribute('data-d'); tab = 'sales'; render(); window.scrollTo(0, 0); break;
+      case 'settings': settingsSheet(); break;
+      case 'settings-save': saveSettings(); break;
+      case 'closed': t.classList.toggle('on'); break;
     }
   });
+  // 판매 탭의 포스 합계·메모는 입력을 마치면 저장
+  document.addEventListener('change', function (e) {
+    var id = e.target.id;
+    if (id !== 's-pos' && id !== 's-memo') return;
+    var r = dayRec(saleDate, true);
+    if (id === 's-memo') r.memo = e.target.value.trim();
+    else {
+      var n = parseNum(e.target.value);
+      r.posTotal = Calc.isNum(n) && n >= 0 ? n : null;
+      if (!Calc.isNum(r.posTotal)) e.target.value = '';
+    }
+    dropIfEmpty(saleDate); save(); drawSales();
+  });
   document.addEventListener('input', function (e) {
+    if (e.target.id === 'q') { drawSales(); return; }
     if (sheet.hidden) return;
     if (document.getElementById('f-unitcost')) updateUnitCost();
     else if (document.getElementById('m-prev')) {

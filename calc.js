@@ -49,9 +49,38 @@
   function fmtPct(r) { return r === null ? '-' : (Math.round(r * 1000) / 10).toLocaleString('ko-KR') + '%'; }
   function fmtUnitCost(n) { return String(parseFloat(n.toFixed(3))); }
 
-  // 저장·불러오기 자료 모양 검사
+  // 하루 판매 정리. rec = { items:[{price,cost,qty}], posTotal } (원가는 판매를 넣을 때의 값으로 저장돼 있음)
+  // 매출 = 포스 합계를 넣었으면 그 값, 아니면 메뉴 판매가 × 개수의 합. 번 돈 = 매출 − 원가 (고정비는 빠짐)
+  function daySummary(rec) {
+    var menuSales = 0, cost = 0, cups = 0;
+    ((rec && rec.items) || []).forEach(function (it) {
+      if (!isNum(it.qty)) return;
+      menuSales += (isNum(it.price) ? it.price : 0) * it.qty;
+      cost += (isNum(it.cost) ? it.cost : 0) * it.qty;
+      cups += it.qty;
+    });
+    var sales = rec && isNum(rec.posTotal) ? rec.posTotal : menuSales;
+    return { sales: sales, menuSales: menuSales, cost: cost, profit: sales - cost, cups: cups,
+             rate: sales > 0 ? cost / sales : null };
+  }
+
+  // 한 달 고정비 정리. fixed = { rent, labor, util, etc } (원)
+  function fixedTotal(fixed) {
+    var t = 0;
+    ['rent', 'labor', 'util', 'etc'].forEach(function (k) { if (fixed && isNum(fixed[k])) t += fixed[k]; });
+    return t;
+  }
+
+  // 저장·불러오기 자료 모양 검사 (판매 기록 sales·설정 settings 는 없어도 됨: 예전 백업 파일)
   function validateData(s) {
     if (!s || !Array.isArray(s.ingredients) || !Array.isArray(s.menus)) return false;
+    if (s.sales !== undefined && (typeof s.sales !== 'object' || s.sales === null || Array.isArray(s.sales))) return false;
+    if (s.settings !== undefined && (typeof s.settings !== 'object' || s.settings === null)) return false;
+    if (s.sales && !Object.keys(s.sales).every(function (d) {
+      var r = s.sales[d];
+      return /^\d{4}-\d{2}-\d{2}$/.test(d) && r && Array.isArray(r.items) &&
+        r.items.every(function (it) { return it && typeof it.name === 'string' && isNum(it.qty); });
+    })) return false;
     var okIng = s.ingredients.every(function (i) {
       return i && typeof i.id === 'string' && typeof i.name === 'string' &&
         isNum(i.price) && isNum(i.qty) && UNITS.indexOf(i.unit) >= 0;
@@ -67,6 +96,7 @@
   root.Calc = {
     MARGIN_MIN: MARGIN_MIN, RATE_MAX: RATE_MAX, UNITS: UNITS,
     isNum: isNum, unitCost: unitCost, menuCost: menuCost, judge: judge, evaluate: evaluate,
+    daySummary: daySummary, fixedTotal: fixedTotal,
     fmtWon: fmtWon, fmtPct: fmtPct, fmtUnitCost: fmtUnitCost, validateData: validateData
   };
 })(typeof window !== 'undefined' ? window : globalThis);
