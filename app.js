@@ -1,8 +1,8 @@
-/* 화면과 저장. 계산은 calc.js(Calc)만 쓴다. 자료는 이 휴대폰(localStorage) 안에만 저장한다. */
+﻿/* 화면과 저장. 계산은 calc.js(Calc)만 쓴다. 자료는 이 휴대폰(localStorage) 안에만 저장한다. */
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 12;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 13;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -460,8 +460,9 @@
       list = (list || []).sort(function (a, b) { return a.added < b.added ? 1 : -1; });
       box.innerHTML = list.length ? list.map(function (d) {
         return '<div class="docrow"><button class="docopen" data-act="doc-open" data-id="' + d.id + '">' +
-          (d.kind === 'pdf' ? '📕 ' : '📘 ') + esc(d.name) + '<small>' + (Math.round(d.size / 102.4) / 10) + 'KB · ' + d.added.slice(0, 10) + '</small></button>' +
-          '<button class="mini danger" data-act="doc-del" data-id="' + d.id + '">삭제</button></div>';
+          (d.kind === 'pdf' ? '📕 ' : '📘 ') + esc(niceName(d.name)) + '<small>' + (Math.round(d.size / 102.4) / 10) + 'KB · ' + d.added.slice(0, 10) + '</small></button>' +
+          '<div class="docbtns">' + (d.kind === 'pdf' ? '<button class="mini" data-act="doc-fill" data-id="' + d.id + '">레시피 채우기</button>' : '') +
+          '<button class="mini danger" data-act="doc-del" data-id="' + d.id + '">삭제</button></div></div>';
       }).join('') : '아직 넣은 파일이 없어요.';
     }, function () { box.textContent = '이 휴대폰에서는 파일을 저장할 수 없어요.'; });
   }
@@ -470,9 +471,91 @@
     if (!kind) return alert(/\.doc$/i.test(file.name) ? '옛날 워드 파일(.doc)은 열 수 없어요. 워드에서 "다른 이름으로 저장 → .docx 또는 PDF"로 바꿔서 넣어 주세요.'
       : 'PDF(.pdf)나 워드(.docx) 파일만 넣을 수 있어요.');
     if (file.size > 30 * 1024 * 1024) return alert('파일이 너무 커요 (30MB까지).');
-    var rec = { id: newId(), name: file.name, kind: kind, size: file.size, added: new Date().toISOString(), blob: file };
-    idbDo('readwrite', function (s) { return s.put(rec); }).then(function () { drawDocs(); openDoc(rec.id); },
-      function () { alert('파일을 저장하지 못했어요. 휴대폰 저장 공간을 확인해 주세요.'); });
+    var rec = { id: newId(), name: niceName(file.name), kind: kind, size: file.size, added: new Date().toISOString(), blob: file };
+    idbDo('readwrite', function (s) { return s.put(rec); }).then(function () {
+      drawDocs();
+      if (kind === 'pdf') fillFromDoc(rec.id); else openDoc(rec.id);
+    }, function () { alert('파일을 저장하지 못했어요. 휴대폰 저장 공간을 확인해 주세요.'); });
+  }
+  // 메신저로 받은 파일은 이름이 %EC%98… 처럼 올 때가 있어 풀어서 보여 줌
+  function niceName(n) {
+    try { n = decodeURIComponent(n); } catch (e) {}
+    return n.split(/[\\/]/).pop();
+  }
+  function getPdf(buf) {
+    return loadScript('./lib/pdf.min.js').then(function () {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdf.worker.min.js';
+      // 한글 글꼴이 파일에 안 들어 있는 PDF도 글자가 보이게 (글꼴 지도·기본 글꼴). 주소는 전체 주소로
+      var at = function (p) { return new URL(p, location.href).href; };
+      return window.pdfjsLib.getDocument({ data: buf, cMapUrl: at('./lib/cmaps/'), cMapPacked: true,
+        standardFontDataUrl: at('./lib/standard_fonts/') }).promise;
+    });
+  }
+  // PDF 표 읽기: 왼쪽 첫 칸(메뉴 이름)을 줄의 기준으로 삼고, 나머지 글자는 높이가 가장 가까운 이름 줄에 붙인다.
+  // 같은 칸(가로 위치)에 있는 글자는 위에서 아래로 이어 붙인다 (두 줄로 넘어간 레시피도 한 칸으로).
+  function pdfRows(pdf) {
+    var rows = [], chain = Promise.resolve();
+    for (var p = 1; p <= pdf.numPages; p++) (function (no) {
+      chain = chain.then(function () { return pdf.getPage(no); }).then(function (page) { return page.getTextContent(); }).then(function (tc) {
+        var items = tc.items.filter(function (it) { return it.str && it.str.trim(); }).map(function (it) {
+          return { x: it.transform[4], y: it.transform[5], s: it.str.trim() };
+        });
+        if (!items.length) return;
+        var left = Math.min.apply(null, items.map(function (i) { return i.x; }));
+        var anchors = items.filter(function (i) { return i.x < left + 20; }).map(function (i) { return { a: i, rest: [] }; });
+        items.forEach(function (i) {
+          if (i.x < left + 20) return;
+          var best = null;
+          anchors.forEach(function (an) { var dy = Math.abs(an.a.y - i.y); if (!best || dy < best.dy) best = { dy: dy, an: an }; });
+          if (best && best.dy < 14) best.an.rest.push(i);
+        });
+        anchors.sort(function (a, b) { return b.a.y - a.a.y; }).forEach(function (an) {
+          var cols = [];
+          an.rest.forEach(function (i) {
+            var c = cols.filter(function (c) { return Math.abs(c.x - i.x) < 6; })[0];
+            if (!c) { c = { x: i.x, parts: [] }; cols.push(c); }
+            c.parts.push(i);
+          });
+          cols.sort(function (a, b) { return a.x - b.x; });
+          rows.push({ cells: [an.a.s].concat(cols.map(function (c) {
+            return c.parts.sort(function (a, b) { return b.y - a.y; }).map(function (i) { return i.s; }).join(' ');
+          })) });
+        });
+      });
+    })(p);
+    return chain.then(function () { return rows; });
+  }
+  function norm(s) { return String(s || '').replace(/[\s·()]/g, '').toLowerCase(); }
+  // 레시피북 PDF에서 메뉴별 만드는 법을 찾아 "만드는 법"이 비어 있는 메뉴에 채움 (원가·재료는 그대로)
+  function fillFromDoc(id) {
+    idbDo('readonly', function (s) { return s.get(id); }).then(function (d) {
+      if (!d || d.kind !== 'pdf') return;
+      return d.blob.arrayBuffer().then(getPdf).then(pdfRows).then(function (rows) {
+        var book = rows.filter(function (r) { return r.cells.length >= 2 && /\d/.test(r.cells[1]); });
+        var found = [];
+        state.menus.forEach(function (m) {
+          if ((m.recipe || '').trim()) return;
+          var sp = splitName(m.name), key = norm(sp.base), best = null;
+          book.forEach(function (r) {
+            var k = norm(r.cells[0]);
+            if (!k) return;
+            var score = k === key ? 1000 : (key.length >= 3 && k.length >= 3 && (k.indexOf(key) >= 0 || key.indexOf(k) >= 0)) ? Math.min(k.length, key.length) : 0;
+            if (score && (!best || score > best.score)) best = { score: score, r: r };
+          });
+          if (!best) return;
+          var c = best.r.cells, upOk = c.length > 2 && /\d/.test(c[2]) && !/미제공/.test(c[2]);
+          var up = /사이즈업/.test(sp.tag) && upOk;
+          found.push({ m: m, text: (up ? c[2] : c[1]) + (upOk && !up ? '\n사이즈업: ' + c[2] : '') });
+        });
+        if (!found.length) { alert('이 PDF에서 메뉴 이름과 맞는 레시피를 찾지 못했어요. 파일은 저장돼 있으니 열어서 볼 수 있어요.'); return; }
+        var empty = state.menus.filter(function (m) { return !(m.recipe || '').trim(); }).length;
+        if (!confirm('레시피북에서 메뉴 ' + found.length + '개의 만드는 법을 찾았어요 (만드는 법이 빈 메뉴 ' + empty + '개 중).\n' +
+          '예: ' + found[0].m.name + ' → ' + found[0].text.split('\n')[0] + '\n\n빈 칸에 채울까요? (이미 적힌 레시피와 원가는 바꾸지 않아요)')) return;
+        found.forEach(function (f) { f.m.recipe = f.text; });
+        save(); tab = 'recipes'; render();
+        alert('메뉴 ' + found.length + '개에 만드는 법을 채웠어요. 못 찾은 메뉴는 메뉴 탭에서 직접 적을 수 있어요.');
+      });
+    }).catch(function () { alert('PDF를 읽지 못했어요. 처음 읽을 때는 인터넷이 연결돼 있어야 해요.'); });
   }
   var libs = {};
   function loadScript(src) {
@@ -486,19 +569,12 @@
   function openDoc(id) {
     idbDo('readonly', function (s) { return s.get(id); }).then(function (d) {
       if (!d) return;
-      openSheet('<h2>' + esc(d.name) + '</h2><div id="docview" class="docview">여는 중…</div>');
+      openSheet('<h2>' + esc(niceName(d.name)) + '</h2><div id="docview" class="docview">여는 중…</div>');
       var out = document.getElementById('docview');
       var fail = function () { if (out) out.textContent = '파일을 열지 못했어요. 처음 열 때는 인터넷이 연결돼 있어야 해요.'; };
       d.blob.arrayBuffer().then(function (buf) {
         if (d.kind === 'pdf') {
-          return loadScript('./lib/pdf.min.js').then(function () {
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdf.worker.min.js';
-            // 한글 글꼴이 파일에 안 들어 있는 PDF도 글자가 보이게 (글꼴 지도·기본 글꼴)
-            // 주소는 전체 주소로 (일꾼 파일 위치 기준으로 찾지 않게)
-            var at = function (p) { return new URL(p, location.href).href; };
-            return window.pdfjsLib.getDocument({ data: buf, cMapUrl: at('./lib/cmaps/'), cMapPacked: true,
-              standardFontDataUrl: at('./lib/standard_fonts/') }).promise;
-          }).then(function (pdf) {
+          return getPdf(buf).then(function (pdf) {
             out.innerHTML = '';
             var chain = Promise.resolve();
             for (var p = 1; p <= pdf.numPages; p++) (function (no) {
@@ -831,6 +907,7 @@
       case 'reload': hardReload(); break;
       case 'doc-add': docInput.value = ''; docInput.click(); break;
       case 'doc-open': openDoc(id); break;
+      case 'doc-fill': fillFromDoc(id); break;
       case 'doc-del':
         if (confirm('이 파일을 앱에서 지울까요? (휴대폰의 원래 파일은 그대로예요)'))
           idbDo('readwrite', function (s) { return s.delete(id); }).then(drawDocs);
