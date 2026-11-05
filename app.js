@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 14;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 15;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -169,19 +169,20 @@
       return state.menus.filter(function (m) { return m.id === it.menuId; })[0] || { id: it.menuId, name: it.name, price: it.price, gone: true };
     });
     var h = sold.length ? '<div class="cathead row">이날 판 메뉴 <small>' + sold.length + '</small>' +
-      '<button class="mini danger" data-act="day-clear" aria-label="초기화" title="초기화">↺</button></div>' + sold.map(saleRow).join('') : '';
-    box.innerHTML = h + grouped('sales', list, saleRow);
-    function saleRow(m) {
+      '<button class="mini danger" data-act="day-clear" aria-label="초기화" title="초기화">↺</button></div>' +
+      sold.map(function (m) { return saleRow(m, 'top'); }).join('') : '';
+    box.innerHTML = h + grouped('sales', list, function (m) { return saleRow(m, 'list'); });
+    function saleRow(m, sec) {   // sec: 'top'(이날 판 메뉴) / 'list'(분류별 목록). 누른 버튼 자리를 지키는 데 씀
       var it = qty[m.id], n = it ? it.qty : 0;
       var cost = it ? it.cost : Calc.evaluate(m, state.ingredients).cost;
       return '<div class="srow' + (n ? ' sold' : '') + '"><div class="nm">' + esc(m.name) + (m.gone ? ' (지운 메뉴)' : '') +
         '<small>' + Calc.fmtWon(m.price) + '원 · 원가 ' + Calc.fmtWon(cost) + '원</small></div>' +
-        '<button class="pm" data-act="minus" data-id="' + m.id + '"' + (n ? '' : ' disabled') + ' aria-label="하나 빼기">−</button>' +
+        '<button class="pm" data-act="minus" data-sec="' + sec + '" data-id="' + m.id + '"' + (n ? '' : ' disabled') + ' aria-label="하나 빼기">−</button>' +
         '<b class="qty">' + n + '</b>' +
-        (m.gone ? '<span class="pm"></span>' : '<button class="pm plus" data-act="plus" data-id="' + m.id + '" aria-label="하나 더하기">+</button>') + '</div>';
+        (m.gone ? '<span class="pm"></span>' : '<button class="pm plus" data-act="plus" data-sec="' + sec + '" data-id="' + m.id + '" aria-label="하나 더하기">+</button>') + '</div>';
     }
   }
-  function changeQty(id, delta) {
+  function changeQty(id, delta, btn) {
     var r = dayRec(saleDate, true);
     var it = r.items.filter(function (x) { return x.menuId === id; })[0];
     var m = state.menus.filter(function (x) { return x.id === id; })[0];
@@ -196,7 +197,15 @@
     it.qty = Math.max(0, it.qty + delta);
     if (!it.qty) r.items = r.items.filter(function (x) { return x !== it; });
     dropIfEmpty(saleDate);
-    save(); drawSales();
+    save();
+    // 다시 그리면 "이날 판 메뉴"가 늘거나 줄고 순서가 바뀌어 화면이 밀림 → 누른 버튼이 손가락 아래 그대로 있게 스크롤을 맞춤
+    var sec = btn && btn.getAttribute('data-sec'), act = btn && btn.getAttribute('data-act');
+    var before = btn ? btn.getBoundingClientRect().top : 0;
+    drawSales();
+    if (!sec) return;
+    var same = document.querySelectorAll('#mlist [data-act="' + act + '"][data-sec="' + sec + '"]'), now = null;
+    for (var i = 0; i < same.length; i++) if (same[i].getAttribute('data-id') === id) now = same[i];
+    if (now) window.scrollBy(0, now.getBoundingClientRect().top - before);
   }
 
   // 보고 있는 날의 판 개수만 한꺼번에 0으로 (날씨·포스 합계·메모·다른 날 기록은 그대로)
@@ -900,8 +909,8 @@
       case 'export': exportData(); break;
       case 'import': fileInput.value = ''; fileInput.click(); break;
       case 'export-csv': exportCsv(); break;
-      case 'plus': changeQty(id, 1); break;
-      case 'minus': changeQty(id, -1); break;
+      case 'plus': changeQty(id, 1, t); break;
+      case 'minus': changeQty(id, -1, t); break;
       case 'day-prev': saleDate = addDays(saleDate, -1); render(); break;
       case 'day-next': saleDate = addDays(saleDate, 1); render(); break;
       case 'day-today': saleDate = ymd(new Date()); render(); break;
