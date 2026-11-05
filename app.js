@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 15;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 16;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -147,10 +147,7 @@
       '<div id="mlist"></div>';
     drawSales();
   }
-  function drawSales() {
-    var box = document.getElementById('mlist');
-    if (!box) return;
-    var r = dayRec(saleDate, false) || { items: [] };
+  function drawSum(r) {
     var s = Calc.daySummary(r);
     document.getElementById('sum').innerHTML =
       '<div class="card sum"><div class="grid"><div>매출<b>' + Calc.fmtWon(s.sales) + '원</b></div><div>원가<b>' +
@@ -159,28 +156,46 @@
       (Calc.isNum(r.posTotal) && Math.round(r.posTotal) !== Math.round(s.menuSales)
         ? ' · 메뉴로 계산한 매출(' + Calc.fmtWon(s.menuSales) + '원)과 ' + Calc.fmtWon(Math.abs(r.posTotal - s.menuSales)) + '원 차이' : '') +
       '</div>' + leftLine(saleDate, s) + '</div>';
-    var qty = {};
-    r.items.forEach(function (it) { qty[it.menuId] = it; });
-    var pop = popularity();
-    // 분류 안에서는 자주 파는 메뉴가 위로 (분류 순서는 메뉴 탭과 같음)
-    var list = state.menus.slice().sort(function (a, b) { return (pop[b.id] || 0) - (pop[a.id] || 0); });
-    // 오늘 판 메뉴는 맨 위에 따로 (메뉴가 지워졌어도 그날 판 기록은 보여 줌)
+  }
+  function qtyMap(r) { var q = {}; r.items.forEach(function (it) { q[it.menuId] = it; }); return q; }
+  // sec: 'top'(이날 판 메뉴) / 'list'(분류별 목록)
+  function saleRow(m, sec, qty) {
+    var it = qty[m.id], n = it ? it.qty : 0;
+    var cost = it ? it.cost : Calc.evaluate(m, state.ingredients).cost;
+    return '<div class="srow' + (n ? ' sold' : '') + '" data-row="' + sec + '" data-id="' + m.id + '"><div class="nm">' + esc(m.name) + (m.gone ? ' (지운 메뉴)' : '') +
+      '<small>' + Calc.fmtWon(m.price) + '원 · 원가 ' + Calc.fmtWon(cost) + '원</small></div>' +
+      '<button class="pm" data-act="minus" data-sec="' + sec + '" data-id="' + m.id + '"' + (n ? '' : ' disabled') + ' aria-label="하나 빼기">−</button>' +
+      '<b class="qty">' + n + '</b>' +
+      (m.gone ? '<span class="pm"></span>' : '<button class="pm plus" data-act="plus" data-sec="' + sec + '" data-id="' + m.id + '" aria-label="하나 더하기">+</button>') + '</div>';
+  }
+  // 오늘 판 메뉴는 맨 위에 따로 (메뉴가 지워졌어도 그날 판 기록은 보여 줌)
+  function soldHtml(r, qty) {
     var sold = r.items.map(function (it) {
       return state.menus.filter(function (m) { return m.id === it.menuId; })[0] || { id: it.menuId, name: it.name, price: it.price, gone: true };
     });
-    var h = sold.length ? '<div class="cathead row">이날 판 메뉴 <small>' + sold.length + '</small>' +
+    return sold.length ? '<div class="cathead row">이날 판 메뉴 <small>' + sold.length + '</small>' +
       '<button class="mini danger" data-act="day-clear" aria-label="초기화" title="초기화">↺</button></div>' +
-      sold.map(function (m) { return saleRow(m, 'top'); }).join('') : '';
-    box.innerHTML = h + grouped('sales', list, function (m) { return saleRow(m, 'list'); });
-    function saleRow(m, sec) {   // sec: 'top'(이날 판 메뉴) / 'list'(분류별 목록). 누른 버튼 자리를 지키는 데 씀
-      var it = qty[m.id], n = it ? it.qty : 0;
-      var cost = it ? it.cost : Calc.evaluate(m, state.ingredients).cost;
-      return '<div class="srow' + (n ? ' sold' : '') + '"><div class="nm">' + esc(m.name) + (m.gone ? ' (지운 메뉴)' : '') +
-        '<small>' + Calc.fmtWon(m.price) + '원 · 원가 ' + Calc.fmtWon(cost) + '원</small></div>' +
-        '<button class="pm" data-act="minus" data-sec="' + sec + '" data-id="' + m.id + '"' + (n ? '' : ' disabled') + ' aria-label="하나 빼기">−</button>' +
-        '<b class="qty">' + n + '</b>' +
-        (m.gone ? '<span class="pm"></span>' : '<button class="pm plus" data-act="plus" data-sec="' + sec + '" data-id="' + m.id + '" aria-label="하나 더하기">+</button>') + '</div>';
-    }
+      sold.map(function (m) { return saleRow(m, 'top', qty); }).join('') : '';
+  }
+  function drawSales() {
+    var box = document.getElementById('mlist');
+    if (!box) return;
+    var r = dayRec(saleDate, false) || { items: [] }, qty = qtyMap(r);
+    drawSum(r);
+    var pop = popularity();
+    // 분류 안에서는 자주 파는 메뉴가 위로 (분류 순서는 메뉴 탭과 같음). 순서는 화면을 새로 열 때만 바뀜
+    var list = state.menus.slice().sort(function (a, b) { return (pop[b.id] || 0) - (pop[a.id] || 0); });
+    box.innerHTML = '<div id="soldbox">' + soldHtml(r, qty) + '</div>' + grouped('sales', list, function (m) { return saleRow(m, 'list', qty); });
+  }
+  // +·− 를 누를 때: 목록은 다시 그리지 않고 그 메뉴 숫자와 "이날 판 메뉴"만 고침 (화면이 움직이지 않게)
+  function updateSales(id) {
+    var r = dayRec(saleDate, false) || { items: [] }, qty = qtyMap(r);
+    drawSum(r);
+    var sb = document.getElementById('soldbox');
+    if (sb) sb.innerHTML = soldHtml(r, qty);
+    var m = state.menus.filter(function (x) { return x.id === id; })[0];
+    var rows = document.querySelectorAll('#mlist [data-row="list"]');
+    for (var i = 0; i < rows.length; i++) if (m && rows[i].getAttribute('data-id') === id) rows[i].outerHTML = saleRow(m, 'list', qty);
   }
   function changeQty(id, delta, btn) {
     var r = dayRec(saleDate, true);
@@ -198,14 +213,16 @@
     if (!it.qty) r.items = r.items.filter(function (x) { return x !== it; });
     dropIfEmpty(saleDate);
     save();
-    // 다시 그리면 "이날 판 메뉴"가 늘거나 줄고 순서가 바뀌어 화면이 밀림 → 누른 버튼이 손가락 아래 그대로 있게 스크롤을 맞춤
+    // "이날 판 메뉴"에 줄이 새로 생기거나 빠질 때만 아래 목록이 밀림 → 그때만 누른 버튼이 손가락 아래 그대로 있게 정수 픽셀로 맞춤
     var sec = btn && btn.getAttribute('data-sec'), act = btn && btn.getAttribute('data-act');
     var before = btn ? btn.getBoundingClientRect().top : 0;
-    drawSales();
+    updateSales(id);
     if (!sec) return;
     var same = document.querySelectorAll('#mlist [data-act="' + act + '"][data-sec="' + sec + '"]'), now = null;
     for (var i = 0; i < same.length; i++) if (same[i].getAttribute('data-id') === id) now = same[i];
-    if (now) window.scrollBy(0, now.getBoundingClientRect().top - before);
+    if (!now) return;
+    var diff = Math.round(now.getBoundingClientRect().top - before);
+    if (Math.abs(diff) >= 1) window.scrollTo(0, Math.round(window.pageYOffset + diff));
   }
 
   // 보고 있는 날의 판 개수만 한꺼번에 0으로 (날씨·포스 합계·메모·다른 날 기록은 그대로)
