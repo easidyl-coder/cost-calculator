@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 13;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 14;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -168,7 +168,8 @@
     var sold = r.items.map(function (it) {
       return state.menus.filter(function (m) { return m.id === it.menuId; })[0] || { id: it.menuId, name: it.name, price: it.price, gone: true };
     });
-    var h = sold.length ? '<div class="cathead">이날 판 메뉴 <small>' + sold.length + '</small></div>' + sold.map(saleRow).join('') : '';
+    var h = sold.length ? '<div class="cathead row">이날 판 메뉴 <small>' + sold.length + '</small>' +
+      '<button class="mini danger" data-act="day-clear" aria-label="초기화" title="초기화">↺</button></div>' + sold.map(saleRow).join('') : '';
     box.innerHTML = h + grouped('sales', list, saleRow);
     function saleRow(m) {
       var it = qty[m.id], n = it ? it.qty : 0;
@@ -194,6 +195,17 @@
     }
     it.qty = Math.max(0, it.qty + delta);
     if (!it.qty) r.items = r.items.filter(function (x) { return x !== it; });
+    dropIfEmpty(saleDate);
+    save(); drawSales();
+  }
+
+  // 보고 있는 날의 판 개수만 한꺼번에 0으로 (날씨·포스 합계·메모·다른 날 기록은 그대로)
+  function clearDay() {
+    var r = dayRec(saleDate, false);
+    if (!r || !r.items.length) return;
+    var n = r.items.reduce(function (a, it) { return a + it.qty; }, 0);
+    if (!confirm(dateLabel(saleDate) + '에 판 메뉴 ' + r.items.length + '가지 (' + n + '개)를 모두 0으로 만들까요?\n날씨·포스 합계·메모와 다른 날 기록은 그대로예요.')) return;
+    r.items = [];
     dropIfEmpty(saleDate);
     save(); drawSales();
   }
@@ -341,7 +353,7 @@
     download('원가계산기_하루정리_' + ymd(new Date()) + '.csv', text, 'text/csv');
   }
   function download(name, text, type) {
-    var blob = new Blob([text], { type: type });
+    var blob = text instanceof Blob ? text : new Blob([text], { type: type });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
@@ -462,6 +474,7 @@
         return '<div class="docrow"><button class="docopen" data-act="doc-open" data-id="' + d.id + '">' +
           (d.kind === 'pdf' ? '📕 ' : '📘 ') + esc(niceName(d.name)) + '<small>' + (Math.round(d.size / 102.4) / 10) + 'KB · ' + d.added.slice(0, 10) + '</small></button>' +
           '<div class="docbtns">' + (d.kind === 'pdf' ? '<button class="mini" data-act="doc-fill" data-id="' + d.id + '">레시피 채우기</button>' : '') +
+          '<button class="mini" data-act="doc-get" data-id="' + d.id + '">받기</button>' +
           '<button class="mini danger" data-act="doc-del" data-id="' + d.id + '">삭제</button></div></div>';
       }).join('') : '아직 넣은 파일이 없어요.';
     }, function () { box.textContent = '이 휴대폰에서는 파일을 저장할 수 없어요.'; });
@@ -908,6 +921,12 @@
       case 'doc-add': docInput.value = ''; docInput.click(); break;
       case 'doc-open': openDoc(id); break;
       case 'doc-fill': fillFromDoc(id); break;
+      case 'day-clear': clearDay(); break;
+      case 'doc-get':   // 넣어 둔 레시피북 파일을 다시 휴대폰에 내려받기
+        idbDo('readonly', function (s) { return s.get(id); }).then(function (d) {
+          if (d) download(niceName(d.name), d.blob);
+        }, function () { alert('파일을 꺼내지 못했어요.'); });
+        break;
       case 'doc-del':
         if (confirm('이 파일을 앱에서 지울까요? (휴대폰의 원래 파일은 그대로예요)'))
           idbDo('readwrite', function (s) { return s.delete(id); }).then(drawDocs);
