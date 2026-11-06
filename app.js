@@ -2,7 +2,11 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 16;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 17;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  // 새 변수는 state 를 만들기 전에 선언한다 (뒤에 두면 저장된 자료가 있을 때 빈 화면이 뜬 적이 있음)
+  var LEDGER_NAMES = {};
+  Calc.LEDGER_CATS.forEach(function (c) { LEDGER_NAMES[c[0]] = c[1]; });
+  var COST_RATES = Calc.COST_RATES;
   var view = document.getElementById('view');
   var sheet = document.getElementById('sheet');
   var fileInput = document.getElementById('file');
@@ -31,6 +35,10 @@
     var s = null;
     try {
       s = JSON.parse(localStorage.getItem(KEY));
+      // 장부 한 줄이 잘못돼도 메뉴·재료·판매 기록까지 통째로 버려지지 않게, 잘못된 장부 줄만 뺀다
+      if (s && Array.isArray(s.ledger)) s.ledger = s.ledger.filter(function (e) {
+        return Calc.validateData({ ingredients: [], menus: [], ledger: [e] });
+      });
       if (!Calc.validateData(s)) s = null;
     } catch (e) { s = null; }
     return fill(s || { ingredients: [], menus: [] });
@@ -51,6 +59,8 @@
   function fill(s) {
     autoCat(s);
     s.sales = s.sales || {};
+    s.ledger = s.ledger || [];   // 가게 장부: 나간 돈 기록 [{id,date,cat,amount,memo}]
+    s.ledger.forEach(function (e) { if (!e.id) e.id = newId(); });   // 다른 곳에서 만든 파일에 id 가 없을 때
     s.notes = s.notes || [];   // 레시피북의 공통 기준 (제목·내용)
     s.settings = s.settings || {};
     s.settings.fixed = s.settings.fixed || {};
@@ -277,6 +287,8 @@
         menus[k].qty += it.qty; menus[k].profit += (it.price - it.cost) * it.qty;
       });
     });
+    var ledDays = {};   // 나간 돈이 적힌 날 (달력 칸에 작은 점)
+    state.ledger.forEach(function (e) { ledDays[e.date] = true; });
     var openDays = openDaysOf(calMonth), share = dailyShare(calMonth + '-01');
     var maxP = 0;
     Object.keys(sums).forEach(function (d) { maxP = Math.max(maxP, sums[d].profit); });
@@ -290,7 +302,7 @@
       var s = sums[d], r = state.sales[d], off = closed.indexOf(parseYmd(d).getDay()) >= 0;
       var lv = s && maxP > 0 && s.profit > 0 ? Math.min(4, Math.ceil(s.profit / maxP * 4)) : 0;
       h += '<button class="day lv' + lv + (off ? ' off' : '') + (d === today ? ' today' : '') + '" data-act="cal-day" data-d="' + d + '">' +
-        '<span class="dn">' + (+d.slice(8)) + (r && r.weather ? ' ' + r.weather : '') + '</span>' +
+        '<span class="dn">' + (+d.slice(8)) + (ledDays[d] ? '<i class="ldot">●</i>' : '') + (r && r.weather ? ' ' + r.weather : '') + '</span>' +
         (s ? '<span class="dp' + (s.profit < 0 ? ' neg' : '') + '">' + man(s.profit) + '</span>' +
           (share ? '<span class="dl' + (s.profit - share < 0 ? ' neg' : '') + '">' + (s.profit - share < 0 ? '' : '+') + man(s.profit - share) + '</span>' : '')
           : (off ? '<span class="dp">쉼</span>' : '')) + '</button>';
@@ -300,7 +312,7 @@
       '이에요. 날짜를 누르면 그날 판매를 넣거나 고칠 수 있어요.</p>';
     // 한 달 정리
     var left = tot.profit - fixed;
-    h += '<div class="card"><div class="name">이번 달 정리</div><div class="grid"><div>매출<b>' + man(tot.sales) + '</b></div><div>원가<b>' +
+    h += '<div class="card"><div class="name">이번 달 정리 <small class="dim">(계산상)</small></div><div class="grid"><div>매출<b>' + man(tot.sales) + '</b></div><div>원가<b>' +
       man(tot.cost) + '</b></div><div>번 돈<b class="pos">' + man(tot.profit) + '</b></div></div>' +
       '<div class="sub">판매 기록 ' + sold + '일 / 영업일 ' + openDays + '일' + (sold ? ' · 하루 평균 번 돈 ' + Calc.fmtWon(tot.profit / sold) + '원' : '') +
       (best ? ' · 가장 많이 번 날 ' + (+best.slice(5, 7)) + '/' + (+best.slice(8)) + ' (' + Calc.fmtWon(sums[best].profit) + '원)' : '') + '</div>';
@@ -314,7 +326,8 @@
     } else {
       h += '<p class="hint">월세·인건비 같은 고정비를 넣으면, 고정비를 빼고 얼마 남는지도 보여 드려요.</p>';
     }
-    h += '<button class="btn block" data-act="settings">고정비·쉬는 요일 설정</button></div>';
+    h += '</div>';
+    h += ledgerHtml(calMonth, openDays);
     // 요일별 평균
     var dowKeys = Object.keys(byDow);
     if (dowKeys.length) {
@@ -336,7 +349,130 @@
         '</table></div>';
     }
     h += '<p class="hint">번 돈 = 매출 − 원가(재료·포장 등 메뉴에 넣은 것). 고정비는 위 "이번 달 정리"에서만 빼요.</p>';
+    h += '<button class="btn block" data-act="settings">고정비·쉬는 요일 설정</button>' +
+      '<p class="hint">세금 신고용 장부가 아니에요.</p>';
     view.innerHTML = h;
+  }
+
+  // ---------- 가게 장부 (달력 탭) ----------
+  // 숫자는 모두 Calc 가 계산한다. 여기서는 보여 주기만 한다.
+  function ledgerHtml(ym, openDays) {
+    var ms = Calc.monthSales(state.sales, ym), lm = Calc.ledgerMonth(state.ledger, ym);
+    var book = Calc.monthBook(ms.sales, lm, state.settings.fixed, ms.days);
+    var h = '<div class="card"><div class="name">가게 장부</div>';
+    if (book.empty) {
+      h += '<div class="sub">이 달은 판매 기록도, 나간 돈 기록도 없어요.</div>';
+    } else {
+      h += '<div class="grid bgrid"><div>들어온 돈<br>(매출)<b>' + Calc.fmtWon(book.sales) + '</b></div><div>나간 돈<br>&nbsp;<b>' +
+        Calc.fmtWon(book.out) + '</b></div><div>실제로 남은 돈<br>&nbsp;<b class="' + (book.left < 0 ? 'neg' : 'pos') + '">' + Calc.fmtWon(book.left) + '</b></div></div>';
+      var pm = Calc.prevMonth(ym), pb = Calc.monthBook(Calc.monthSales(state.sales, pm).sales, Calc.ledgerMonth(state.ledger, pm),
+        state.settings.fixed, Calc.monthSales(state.sales, pm).days);
+      if (!pb.empty) {
+        var diff = book.left - pb.left;
+        h += '<div class="sub">지난달은 ' + (pb.left < 0 ? Calc.fmtWon(-pb.left) + '원 모자랐어요' : Calc.fmtWon(pb.left) + '원 남았어요') +
+          (Math.round(diff) === 0 ? ' (같아요)' : ' (' + (diff > 0 ? '▲ ' : '▼ ') + Calc.fmtWon(Math.abs(diff)) + '원)') + '</div>';
+      }
+      h += '<table class="tbl"><tr><th>항목</th><th>금액</th><th>출처</th></tr>' +
+        book.rows.filter(function (r) { return r.value > 0 || r.count > 0; }).map(function (r) {
+          return '<tr><td>' + esc(r.label) + '</td><td>' + Calc.fmtWon(r.value) + '</td><td>' + r.source + '</td></tr>';
+        }).join('') + '</table>';
+      book.warnings.forEach(function (w) { h += '<div class="warn">⚠️ ' + esc(w) + '</div>'; });
+      if (ym === ymd(new Date()).slice(0, 7)) h += '<div class="sub">월 중간이라면 아직 안 적은 돈이 있을 수 있어요.</div>';
+    }
+    h += '<button class="btn primary block" data-act="led-new">+ 나간 돈 적기</button></div>';
+
+    // 레시피 원가 vs 실제 재료비
+    var cp = Calc.materialCompare(ms.cost, lm, ms.days, openDays);
+    h += '<div class="card"><div class="name">레시피 원가 vs 실제 재료비</div>';
+    if (cp.level === 'nodata') {
+      h += '<div class="sub">재료 구입이나 포장재를 적으면 레시피 원가와 비교해 드려요.</div>';
+    } else {
+      h += '<div class="grid bgrid"><div>레시피로 계산한 원가<b>' + Calc.fmtWon(cp.recipe) + '</b></div><div>실제 재료비<br>(재료+포장재)<b>' +
+        Calc.fmtWon(cp.actual) + '</b></div><div>차이<br>&nbsp;<b>' + (cp.diff > 0 ? '+' : '') + Calc.fmtWon(cp.diff) + '</b></div></div>';
+      var msg = {
+        norecipe: '비교할 판매 기록이 없어요.',
+        ok: '거의 맞아요. (' + Calc.fmtPct(cp.ratio) + ')',
+        more: '실제로 더 썼어요. 조금 차이가 있어요. (+' + Calc.fmtPct(cp.ratio) + ')',
+        much: '실제로 훨씬 더 썼어요. 아래를 살펴보세요. (+' + Calc.fmtPct(cp.ratio) + ')',
+        less: '레시피보다 덜 샀어요. 아래를 살펴보세요. (' + Calc.fmtPct(cp.ratio) + ')'
+      }[cp.level];
+      h += '<div class="sub"><b>' + msg + '</b></div>';
+      if (cp.lowRecord) h += '<div class="warn">판매 기록이 적은 달이라 레시피 원가가 작게 나왔을 수 있어요. 포스 합계만 넣고 메뉴 개수를 안 넣은 날은 레시피 원가가 0원으로 잡혀요. (판매 기록 ' + ms.days + '일 / 영업일 ' + openDays + '일)</div>';
+      var ideas = [];
+      if (cp.level === 'more' || cp.level === 'much') ideas = [
+        '버려진 재료가 많지 않았나요? (유통기한 지남, 쏟음, 만들다 실패)',
+        '레시피보다 더 넣고 있지 않나요? (샷·우유·시럽 양)',
+        '서비스로 드린 음료·시음이 판매 기록에 안 들어갔나요?',
+        '판매 입력을 빠뜨린 날이 있지 않나요?',
+        '이번 달에 많이 사 둔 재료가 창고에 남아 있나요?',
+        '재료값이 올랐는데 재료 탭 단가를 안 고치지 않았나요?',
+        '가게 비품·청소용품을 "재료 구입"에 적지 않았나요? ("수리·비품"으로)'];
+      else if (cp.level === 'less') ideas = [
+        '지난달에 사 둔 재료를 이번 달에 쓴 건 아닌가요?',
+        '재료 구입 영수증을 빠뜨리지 않았나요?',
+        '레시피 양이 실제보다 많게 잡혀 있거나 단가를 높게 넣지 않았나요?'];
+      if (ideas.length) h += '<details class="more"><summary>의심해 볼 것</summary><ul class="ideas">' +
+        ideas.map(function (t) { return '<li>' + t + '</li>'; }).join('') + '</ul></details>';
+      h += '<div class="sub">한 달만 보면 산 양과 쓴 양이 달라 흔들릴 수 있어요. 석 달쯤 모이면 더 믿을 만해요.</div>';
+    }
+    h += '</div>';
+
+    // 이번 달에 적은 나간 돈 (접이식. 열고 닫을 때 다시 그리지 않음)
+    var list = state.ledger.filter(function (e) { return e.date.slice(0, 7) === ym; }).sort(function (a, b) {
+      return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+    });
+    if (list.length) {
+      h += '<details class="card ledlist"><summary>적은 나간 돈 ' + list.length + '건 (눌러서 고치기)</summary>' +
+        list.map(function (e) {
+          return '<button class="lrow" data-act="led-edit" data-id="' + e.id + '"><span>' + (+e.date.slice(5, 7)) + '/' + (+e.date.slice(8)) + ' · ' +
+            esc(LEDGER_NAMES[e.cat] || e.cat) + (e.memo ? ' · ' + esc(e.memo) : '') + '</span><b>' + Calc.fmtWon(e.amount) + '원</b></button>';
+        }).join('') + '</details>';
+    }
+    return h;
+  }
+  // 나간 돈 입력창. 항목 버튼은 classList 로 표시만 바꾸고 창을 다시 그리지 않는다 (아이폰 화면 밀림 방지)
+  function ledgerSheet(e) {
+    var isNew = !e;
+    e = e || { date: ymd(new Date()), cat: '', amount: '', memo: '' };
+    openSheet('<h2>' + (isNew ? '나간 돈 적기' : '나간 돈 고치기') + '</h2>' +
+      '<label>날짜</label><input id="l-date" class="f" type="date" value="' + esc(e.date) + '">' +
+      '<label>항목</label><div class="catpick">' + Calc.LEDGER_CATS.map(function (c) {
+        return '<button data-act="led-cat" data-c="' + c[0] + '"' + (e.cat === c[0] ? ' class="on"' : '') + '>' + c[1] + '</button>';
+      }).join('') + '</div>' +
+      '<p class="hint">카드 수수료·포스 사용료를 고정비 "그 밖" 칸에 넣었다면 여기 적지 마세요. 같은 돈이 두 번 빠져요.</p>' +
+      '<label>금액 (원)</label><input id="l-amt" class="f" inputmode="numeric" value="' + (Calc.isNum(e.amount) ? e.amount : '') + '" placeholder="0">' +
+      '<label>메모 (선택)</label><input id="l-memo" class="f" maxlength="40" value="' + esc(e.memo || '') + '" placeholder="예: 우유 20개">' +
+      '<div class="okmsg" id="okmsg"></div><div class="err" id="err"></div>' +
+      '<div class="actions"><button class="btn" data-act="close">닫기</button>' +
+      (isNew ? '' : '<button class="btn danger" data-act="led-del" data-id="' + e.id + '">삭제</button>') +
+      '<button class="btn primary" data-act="led-save" data-id="' + (isNew ? '' : e.id) + '">저장</button></div>' +
+      (isNew ? '<button class="btn block" data-act="led-save-more">저장하고 하나 더</button>' : ''));
+  }
+  function saveLedger(id, more) {
+    var date = val('l-date'), amount = parseNum(val('l-amt')), memo = val('l-memo').trim().slice(0, 40);
+    var on = sheet.querySelector('[data-act="led-cat"].on'), cat = on ? on.getAttribute('data-c') : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return showErr('날짜를 골라 주세요.');
+    if (!cat) return showErr('항목을 골라 주세요.');
+    if (!Calc.isNum(amount) || amount <= 0) return showErr('금액은 0보다 큰 숫자로 넣어 주세요.');
+    var e = null;
+    if (id) e = state.ledger.filter(function (x) { return x.id === id; })[0] || null;
+    if (!e) { e = { id: newId() }; state.ledger.push(e); }
+    e.date = date; e.cat = cat; e.amount = amount; e.memo = memo;
+    save();
+    if (more) {   // 창은 그대로 두고 금액·메모 칸만 비움 (날짜·항목은 그대로)
+      document.getElementById('l-amt').value = '';
+      document.getElementById('l-memo').value = '';
+      document.getElementById('err').textContent = '';
+      document.getElementById('okmsg').textContent = '저장했어요. 이어서 적어 주세요.';
+      render();
+      return;
+    }
+    closeSheet(); render();
+  }
+  function delLedger(id) {
+    if (!confirm('이 나간 돈 기록을 지울까요?')) return;
+    state.ledger = state.ledger.filter(function (x) { return x.id !== id; });
+    save(); closeSheet(); render();
   }
   function settingsSheet() {
     var f = state.settings.fixed, c = state.settings.closed;
@@ -709,7 +845,8 @@
         '</span><span>' + Calc.fmtWon(m.price) + '원</span></div>' +
         '<div class="grid"><div>원가<b>' + Calc.fmtWon(r.cost) + '원</b></div><div>마진<b>' + Calc.fmtWon(r.margin) +
         '원</b></div><div>원가율<b>' + Calc.fmtPct(r.rate) + '</b></div></div>' +
-        '<div style="margin-top:8px">' + verdictBadge(r.verdict) + '</div></button>';
+        '<div style="margin-top:8px">' + verdictBadge(r.verdict) +
+        (Calc.usesRate(m) ? ' <span class="ratetag">원가율 ' + Calc.fmtPct(m.costRate) + '로 정함</span>' : '') + '</div></button>';
     });
   }
   function catField(list, cur) {   // 분류 입력칸 + 이미 쓰는 분류 고르기
@@ -726,6 +863,7 @@
       '<button class="btn block" data-act="import">불러오기 (파일 선택)</button>' +
       '<button class="btn block" data-act="export-csv">하루 정리 엑셀(CSV)로 받기</button>' +
       '<p class="hint">판매 기록 ' + Object.keys(state.sales).length + '일치가 저장돼 있어요.</p>' +
+      '<p class="hint">나간 돈 기록 ' + state.ledger.length + '건이 저장돼 있어요.</p>' +
       '<p class="hint">앱 버전 ' + APP_VER + '</p>';
   }
 
@@ -787,13 +925,24 @@
   function menuSheet(m) {
     var isNew = !m;
     m = m || { name: '', price: '', items: [] };
+    var rateMode = Calc.usesRate(m), rates = COST_RATES.slice();
+    if (rateMode && !rates.some(function (r) { return Math.abs(r - m.costRate) < 1e-9; })) rates.push(m.costRate);   // 불러온 파일의 다른 원가율도 보이게
     editItems = m.items.map(function (it) { return { ingId: it.ingId, amount: it.amount }; });
     openSheet('<h2>' + (isNew ? '메뉴 추가' : '메뉴 수정') + '</h2>' +
       '<label>이름</label><input id="f-name" class="f" value="' + esc(m.name) + '" placeholder="예: 카페라떼">' +
       catField(state.menus, m.cat) +
       '<label>판매가 (원)</label><input id="f-price" class="f" inputmode="decimal" value="' + esc(m.price) + '">' +
+      '<label>원가 정하는 방법</label><div class="seg" id="cost-mode">' +
+      '<button data-act="cost-mode" data-mode="items"' + (rateMode ? '' : ' class="on"') + '>재료로 계산</button>' +
+      '<button data-act="cost-mode" data-mode="rate"' + (rateMode ? ' class="on"' : '') + '>원가율로 정하기</button></div>' +
+      '<div id="mode-items"' + (rateMode ? ' hidden' : '') + '>' +
       '<label>들어가는 재료와 사용량</label><div id="rows"></div>' +
-      '<button class="btn block" data-act="row-add">+ 재료 넣기</button>' +
+      '<button class="btn block" data-act="row-add">+ 재료 넣기</button></div>' +
+      '<div id="mode-rate"' + (rateMode ? '' : ' hidden') + '>' +
+      '<label>원가율 (판매가에서 원가가 차지하는 비율)</label><div class="weather rates">' + rates.map(function (r) {
+        return '<button data-act="cost-rate" data-r="' + r + '"' + (rateMode && Math.abs(r - m.costRate) < 1e-9 ? ' class="on"' : '') + '>' + Calc.fmtPct(r) + '</button>';
+      }).join('') + '</div>' +
+      '<p class="hint">원가 = 판매가 × 원가율. 판매가를 바꾸면 원가도 따라 바뀌어요. 적어 둔 재료는 지워지지 않고, "재료로 계산"을 누르면 돌아와요.</p></div>' +
       '<label>만드는 법 (레시피북에 보여요)</label><textarea id="f-recipe" class="f" rows="4" placeholder="예: 샷 1 + 우유 180ml, 라떼아트">' +
       esc(m.recipe || '') + '</textarea>' +
       '<div class="preview" id="m-prev"></div><div class="err" id="err"></div>' +
@@ -824,13 +973,24 @@
     }).join('');
     updateMenuPreview();
   }
+  // 메뉴 입력창에서 고른 원가 방법·원가율은 화면(DOM)에서 읽는다 (고를 때 창을 다시 그리지 않음)
+  function editMode() {
+    var b = sheet.querySelector('[data-act="cost-mode"].on');
+    return b && b.getAttribute('data-mode') === 'rate' ? 'rate' : 'items';
+  }
+  function editRate() {
+    var b = sheet.querySelector('[data-act="cost-rate"].on');
+    return b ? parseFloat(b.getAttribute('data-r')) : null;
+  }
   function updateMenuPreview() {
     var el = document.getElementById('m-prev');
     if (!el) return;
     readRows();
     var items = editItems.filter(function (it) { return Calc.isNum(it.amount); });
-    var r = Calc.evaluate({ price: parseNum(val('f-price')), items: items }, state.ingredients);
-    el.innerHTML = '원가 <b>' + Calc.fmtWon(r.cost) + '원</b> · 마진 <b>' + Calc.fmtWon(r.margin) + '원</b> · 원가율 <b>' +
+    var mode = editMode(), rate = editRate();
+    if (mode === 'rate' && rate === null) { el.textContent = '원가율을 골라 주세요.'; return; }
+    var r = Calc.evaluate({ price: parseNum(val('f-price')), items: items, costRate: mode === 'rate' ? rate : null }, state.ingredients);
+    el.innerHTML = (mode === 'rate' ? '원가율 ' + Calc.fmtPct(rate) + '로 정함 · ' : '') + '원가 <b>' + Calc.fmtWon(r.cost) + '원</b> · 마진 <b>' + Calc.fmtWon(r.margin) + '원</b> · 원가율 <b>' +
       Calc.fmtPct(r.rate) + '</b> ' + verdictBadge(r.verdict);
   }
   function saveMenu(id) {
@@ -838,13 +998,20 @@
     var name = val('f-name').trim(), price = parseNum(val('f-price'));
     if (!name) return showErr('이름을 입력해 주세요.');
     if (!Calc.isNum(price) || price < 0) return showErr('판매가를 0 이상의 숫자로 입력해 주세요.');
-    for (var i = 0; i < editItems.length; i++) {
-      if (!Calc.isNum(editItems[i].amount) || editItems[i].amount < 0) return showErr('사용량을 0 이상의 숫자로 입력하거나, 필요 없는 재료는 ✕로 빼 주세요.');
+    var rateMode = editMode() === 'rate', rate = editRate();
+    if (rateMode && rate === null) return showErr('원가율을 골라 주세요.');
+    if (!rateMode) {
+      for (var i = 0; i < editItems.length; i++) {
+        if (!Calc.isNum(editItems[i].amount) || editItems[i].amount < 0) return showErr('사용량을 0 이상의 숫자로 입력하거나, 필요 없는 재료는 ✕로 빼 주세요.');
+      }
+    } else {   // 원가율로 정할 때는 비어 있거나 틀린 재료 칸은 저장하지 않고, 맞게 적힌 재료만 남겨 둠
+      editItems = editItems.filter(function (it) { return Calc.isNum(it.amount) && it.amount >= 0; });
     }
     var m = null;
     if (id) state.menus.forEach(function (x) { if (x.id === id) m = x; });
     if (!m) { m = { id: newId() }; state.menus.push(m); }
     m.name = name; m.price = price; m.cat = val('f-cat').trim() || guessCat(name); m.recipe = val('f-recipe').trim(); m.items = editItems.map(function (it) { return { ingId: it.ingId, amount: it.amount }; });
+    if (rateMode) m.costRate = rate; else delete m.costRate;
     save(); closeSheet(); render();
   }
   function delMenu(id) {
@@ -889,12 +1056,19 @@
       if (!Calc.validateData(s)) { alert('이 파일은 원가계산기 백업 파일이 아니에요. 불러오지 않았어요.'); return; }
       // 판매 기록이 없는 파일(재료·메뉴만)이면 지금 판매 기록과 설정은 그대로 둔다
       var keep = s.sales === undefined;
+      // 나간 돈 기록(장부)이 없는 예전 파일이면 지금 장부를 그대로 남긴다
+      var keepL = s.ledger === undefined;
+      var nowL = state.ledger.length;
+      var ledMsg = keepL ? '\n나간 돈 기록 ' + nowL + '건은 그대로 남아요.'
+        : '\n나간 돈 기록도 파일의 ' + s.ledger.length + '건으로 바뀌어요.' +
+          (s.ledger.length === 0 && nowL > 0 ? '\n\n⚠️ 파일에는 나간 돈 기록이 없어서 지금 ' + nowL + '건이 사라져요.' : '');
       if (!confirm('지금 들어 있는 재료 ' + state.ingredients.length + '개·메뉴 ' + state.menus.length +
         '개가 모두 지워지고, 파일의 재료 ' + s.ingredients.length + '개·메뉴 ' + s.menus.length + '개로 바뀌어요.\n' +
         (keep ? '판매 기록 ' + Object.keys(state.sales).length + '일치는 그대로 남아요.'
-              : '판매 기록도 파일의 ' + Object.keys(s.sales).length + '일치로 바뀌어요.') + ' 불러올까요?')) return;
+              : '판매 기록도 파일의 ' + Object.keys(s.sales).length + '일치로 바뀌어요.') + ledMsg + '\n불러올까요?')) return;
       state = fill({ ingredients: s.ingredients, menus: s.menus,
         sales: keep ? state.sales : s.sales, settings: keep ? state.settings : s.settings,
+        ledger: keepL ? state.ledger : s.ledger,
         notes: s.notes || state.notes });
       save(); render();
       alert('불러왔어요.');
@@ -943,6 +1117,25 @@
       case 'settings': settingsSheet(); break;
       case 'settings-save': saveSettings(); break;
       case 'closed': t.classList.toggle('on'); break;
+      case 'led-new': ledgerSheet(null); break;
+      case 'led-edit': ledgerSheet(state.ledger.filter(function (x) { return x.id === id; })[0] || null); break;
+      case 'led-cat':   // 표시만 바꿈 (창을 다시 그리지 않음)
+        var lb = t.parentNode.querySelectorAll('button');
+        for (var li = 0; li < lb.length; li++) lb[li].classList.toggle('on', lb[li] === t);
+        break;
+      case 'led-save': saveLedger(id, false); break;
+      case 'led-save-more': saveLedger('', true); break;
+      case 'led-del': delLedger(id); break;
+      case 'cost-mode':   // 재료 칸/원가율 칸을 보이거나 숨기기만 함 (재료 목록은 그대로 남김)
+        var cm = t.getAttribute('data-mode'), cb = t.parentNode.querySelectorAll('button');
+        for (var ci2 = 0; ci2 < cb.length; ci2++) cb[ci2].classList.toggle('on', cb[ci2] === t);
+        document.getElementById('mode-items').hidden = cm === 'rate';
+        document.getElementById('mode-rate').hidden = cm !== 'rate';
+        updateMenuPreview(); break;
+      case 'cost-rate':
+        var rb = t.parentNode.querySelectorAll('button');
+        for (var ri = 0; ri < rb.length; ri++) rb[ri].classList.toggle('on', rb[ri] === t);
+        updateMenuPreview(); break;
       case 'reload': hardReload(); break;
       case 'doc-add': docInput.value = ''; docInput.click(); break;
       case 'doc-open': openDoc(id); break;
