@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 23;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 26;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   // 새 변수는 state 를 만들기 전에 선언한다 (뒤에 두면 저장된 자료가 있을 때 빈 화면이 뜬 적이 있음)
   var LEDGER_NAMES = {};
   Calc.LEDGER_CATS.forEach(function (c) { LEDGER_NAMES[c[0]] = c[1]; });
@@ -120,7 +120,7 @@
   }
   function dropIfEmpty(d) {
     var r = state.sales[d];
-    if (r && !r.items.length && !r.memo && !r.weather && !Calc.isNum(r.posTotal)) delete state.sales[d];
+    if (r && !r.items.length && !r.memo && !r.weather && !Calc.isNum(r.posTotal) && !Calc.isNum(r.points)) delete state.sales[d];
   }
   function popularity() {   // 메뉴별로 지금까지 판 개수 (자주 파는 메뉴를 위로)
     var c = {};
@@ -163,9 +163,16 @@
       '<div class="card sum"><div class="grid"><div>매출<b>' + Calc.fmtWon(s.sales) + '원</b></div><div>원가<b>' +
       Calc.fmtWon(s.cost) + '원</b></div><div>번 돈<b class="' + (s.profit < 0 ? 'neg' : 'pos') + '">' + Calc.fmtWon(s.profit) + '원</b></div></div>' +
       '<div class="sub">' + s.cups + '개 판매 · 원가율 ' + Calc.fmtPct(s.rate) +
+      (s.pointsOff ? ' · 포인트 ' + Calc.fmtWon(s.pointsOff) + '원 뺌' : '') +
+      (s.points && !s.pointsOff ? ' · 포스 합계를 넣어서 포인트는 따로 안 뺌' : '') +
       (Calc.isNum(r.posTotal) && Math.round(r.posTotal) !== Math.round(s.menuSales)
         ? ' · 메뉴로 계산한 매출(' + Calc.fmtWon(s.menuSales) + '원)과 ' + Calc.fmtWon(Math.abs(r.posTotal - s.menuSales)) + '원 차이' : '') +
-      '</div>' + leftLine(saleDate, s) + soldLine(r) + '</div>';
+      '</div>' + leftLine(saleDate, s) + ptLine(r) + soldLine(r) + '</div>';
+  }
+  // 매출 카드 안 작은 한 줄: 손님이 포인트로 낸 금액 (넣으면 그날 매출에서 뺌)
+  function ptLine(r) {
+    return '<div class="ptrow"><label for="s-pt">포인트 사용</label><input id="s-pt" class="f" inputmode="numeric" enterkeyhint="done" placeholder="0" value="' +
+      (Calc.isNum(r.points) ? r.points : '') + '"><span>원 빼기</span></div>';
   }
   // 위에 한 줄로 "이날 판 메뉴" 보여 주기 (작은 글씨로 전부, 줄이 늘면 changeQty 가 화면 위치를 맞춤). 누르면 맨 아래 목록으로
   function soldLine(r) {
@@ -199,9 +206,10 @@
     drawSum(r);
     var pop = popularity();
     // 분류 안에서는 자주 파는 메뉴가 위로 (분류 순서는 메뉴 탭과 같음). 순서는 화면을 새로 열 때만 바뀜
-    var list = state.menus.slice().sort(function (a, b) { return (pop[b.id] || 0) - (pop[a.id] || 0); });
+    var list = tempGroups(state.menus).sort(function (a, b) { return popOf(b, pop) - popOf(a, pop); });
     // 메뉴 목록이 검색창 바로 아래, "이날 판 메뉴"는 맨 아래
-    box.innerHTML = grouped('sales', list, function (m) { return saleRow(m, 'list', qty); }) + '<div id="soldbox">' + soldHtml(r, qty) + '</div>';
+    box.innerHTML = grouped('sales', list, function (m) { return m.members ? groupRow(m, qty) + subRows(m, qty) : saleRow(m, 'list', qty); }) +
+      '<div id="soldbox">' + soldHtml(r, qty) + '</div>';
     // 첫 분류 제목 오른쪽에도 ↺ (늘 자리를 차지하고 판 게 없을 때는 숨김 → 나타나도 화면이 안 밀림)
     var head = box.querySelector('.cathead');
     if (head && head.parentNode === box) {
@@ -214,6 +222,55 @@
     var b = document.getElementById('topclear');
     if (b) b.style.visibility = r.items && r.items.length ? 'visible' : 'hidden';
   }
+  // HOT·ICE 묶기: 이름에서 HOT/ICE(핫/아이스)만 뺀 이름과 분류가 같은 메뉴가 2개 이상이면 한 줄로 (판매 탭에서만)
+  var openGroups = {}, TEMP_RE = /(^|\s)(HOT|ICE|핫|아이스)(?=\s|$)/i, salesGroups = {};
+  function tempOf(name) { var m = String(name).match(TEMP_RE); return m ? m[2].toUpperCase() : ''; }
+  function tempGroups(menus) {
+    var by = {}, out = [];
+    salesGroups = {};
+    menus.forEach(function (m) {
+      if (!tempOf(m.name)) { out.push(m); return; }
+      var base = m.name.replace(TEMP_RE, ' ').replace(/\s+/g, ' ').trim(), key = catOf(m) + '|' + base;
+      if (!by[key]) { by[key] = { id: 'g' + out.length, name: base, cat: m.cat, members: [], alias: '' }; out.push(by[key]); }
+      by[key].members.push(m); by[key].alias += ' ' + m.name;
+    });
+    return out.map(function (x) {
+      if (!x.members) return x;
+      if (x.members.length < 2) return x.members[0];
+      x.members.sort(function (a, b) { return tempOf(a.name) < tempOf(b.name) ? -1 : 1; });   // HOT 먼저
+      x.id = 'g_' + x.members[0].id;   // 다시 그려도 같은 이름 (펼친 상태 기억용)
+      x.members.forEach(function (m) { salesGroups[m.id] = x; });
+      return x;
+    });
+  }
+  function popOf(x, pop) { return x.members ? x.members.reduce(function (a, m) { return a + (pop[m.id] || 0); }, 0) : (pop[x.id] || 0); }
+  function groupRow(g, qty) {
+    var n = g.members.reduce(function (a, m) { return a + (qty[m.id] ? qty[m.id].qty : 0); }, 0);
+    var ps = g.members.map(function (m) { return m.price; }), lo = Math.min.apply(null, ps), hi = Math.max.apply(null, ps);
+    var parts = g.members.map(function (m) { var q = qty[m.id] ? qty[m.id].qty : 0; return tempOf(m.name) + (q ? ' ' + q : ''); }).join(' · ');
+    return '<button class="srow grp' + (n ? ' sold' : '') + '" data-row="list" data-gid="' + g.id + '" data-act="vpick">' +
+      '<div class="nm">' + esc(g.name) + '<small>' + Calc.fmtWon(lo) + (hi !== lo ? '~' + Calc.fmtWon(hi) : '') + '원 · ' + esc(parts) + '</small></div>' +
+      '<b class="qty">' + n + '</b><span class="pick">' + (openGroups[g.id] ? '접기 ▲' : '고르기 ▼') + '</span></button>';
+  }
+  // 묶음 줄을 누르면 바로 아래에 HOT·ICE 줄이 펼쳐짐 (다른 창으로 안 넘어감)
+  function subRows(g, qty) {
+    return openGroups[g.id] ? '<div class="vrows" data-sub="' + g.id + '">' + g.members.map(function (m) { return saleRow(m, 'list', qty); }).join('') + '</div>' : '';
+  }
+  function toggleGroup(gid) {
+    var g = findGroup(gid), row = document.querySelector('#mlist [data-gid="' + gid + '"]');
+    if (!g || !row) return;
+    openGroups[gid] = !openGroups[gid];
+    var r = dayRec(saleDate, false) || { items: [] }, qty = qtyMap(r);
+    var sub = document.querySelector('#mlist [data-sub="' + gid + '"]');
+    if (sub) sub.parentNode.removeChild(sub);
+    row.insertAdjacentHTML('afterend', subRows(g, qty));
+    row.outerHTML = groupRow(g, qty);
+  }
+  function findGroup(gid) {
+    for (var k in salesGroups) if (salesGroups[k].id === gid) return salesGroups[k];
+    return null;
+  }
+
   // +·− 를 누를 때: 목록은 다시 그리지 않고 그 메뉴 숫자와 "이날 판 메뉴"만 고침 (화면이 움직이지 않게)
   function updateSales(id) {
     var r = dayRec(saleDate, false) || { items: [] }, qty = qtyMap(r);
@@ -223,7 +280,11 @@
     showTopClear(r);
     var m = state.menus.filter(function (x) { return x.id === id; })[0];
     var rows = document.querySelectorAll('#mlist [data-row="list"]');
-    for (var i = 0; i < rows.length; i++) if (m && rows[i].getAttribute('data-id') === id) rows[i].outerHTML = saleRow(m, 'list', qty);
+    var g = salesGroups[id];
+    for (var i = 0; i < rows.length; i++) {
+      if (m && rows[i].getAttribute('data-id') === id) rows[i].outerHTML = saleRow(m, 'list', qty);
+      else if (g && rows[i].getAttribute('data-gid') === g.id) rows[i].outerHTML = groupRow(g, qty);
+    }
   }
   function changeQty(id, delta, btn) {
     var r = dayRec(saleDate, true);
@@ -521,11 +582,11 @@
     save(); closeSheet(); render();
   }
   function exportCsv() {
-    var rows = [['날짜', '요일', '날씨', '매출', '원가', '번 돈', '원가율(%)', '판매 개수', '메모']];
+    var rows = [['날짜', '요일', '날씨', '매출', '원가', '번 돈', '원가율(%)', '판매 개수', '포인트 사용', '메모']];
     Object.keys(state.sales).sort().forEach(function (d) {
       var r = state.sales[d], s = Calc.daySummary(r);
       rows.push([d, DOW[parseYmd(d).getDay()], r.weather || '', Math.round(s.sales), Math.round(s.cost), Math.round(s.profit),
-        s.rate === null ? '' : Math.round(s.rate * 1000) / 10, s.cups, r.memo || '']);
+        s.rate === null ? '' : Math.round(s.rate * 1000) / 10, s.cups, s.points ? Math.round(s.points) : '', r.memo || '']);
     });
     var text = '﻿' + rows.map(function (r) {
       return r.map(function (c) { c = String(c); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(',');
@@ -559,15 +620,16 @@
   function controls(key, list, placeholder) {
     var f = filt[key], cs = cats(list);
     if (f.cat && cs.indexOf(f.cat) < 0) f.cat = '';
-    return '<input id="q" class="f search" data-key="' + key + '" placeholder="🔍 ' + placeholder + '" autocomplete="off" value="' + esc(f.q) + '">' +
+    // 검색창·분류 버튼은 아래로 내려도 위에 붙어 따라옴
+    return '<div class="stick"><input id="q" class="f search" data-key="' + key + '" placeholder="🔍 ' + placeholder + '" autocomplete="off" value="' + esc(f.q) + '">' +
       (cs.length > 1 ? '<div class="chips">' + [''].concat(cs).map(function (c) {
         return '<button data-act="cat" data-key="' + key + '" data-cat="' + esc(c) + '"' + (f.cat === c ? ' class="on"' : '') + '>' + esc(c || '전체') + '</button>';
-      }).join('') + '</div>' : '');
+      }).join('') + '</div>' : '') + '</div>';
   }
   function match(key, x) {
     var f = filt[key], q = f.q.replace(/\s/g, '').toLowerCase();
     if (f.cat && catOf(x) !== f.cat) return false;
-    return !q || (x.name + ' ' + (x.cat || '')).replace(/\s/g, '').toLowerCase().indexOf(q) >= 0;
+    return !q || (x.name + ' ' + (x.cat || '') + (x.alias || '')).replace(/\s/g, '').toLowerCase().indexOf(q) >= 0;
   }
   function grouped(key, list, row) {   // 분류 제목을 붙여 줄 세우기
     var h = '', shown = 0;
@@ -1118,6 +1180,7 @@
       case 'export': exportData(); break;
       case 'import': fileInput.value = ''; fileInput.click(); break;
       case 'export-csv': exportCsv(); break;
+      case 'vpick': toggleGroup(t.getAttribute('data-gid')); break;
       case 'plus': changeQty(id, 1, t); break;
       case 'minus': changeQty(id, -1, t); break;
       case 'day-prev': saleDate = addDays(saleDate, -1); render(); break;
@@ -1187,9 +1250,14 @@
   // 판매 탭의 포스 합계·메모는 입력을 마치면 저장
   document.addEventListener('change', function (e) {
     var id = e.target.id;
-    if (id !== 's-pos' && id !== 's-memo') return;
+    if (id !== 's-pos' && id !== 's-memo' && id !== 's-pt') return;
     var r = dayRec(saleDate, true);
     if (id === 's-memo') r.memo = e.target.value.trim();
+    else if (id === 's-pt') {   // 손님이 포인트로 낸 금액 → 그날 매출에서 뺌
+      var pn = parseNum(e.target.value);
+      r.points = Calc.isNum(pn) && pn > 0 ? pn : null;
+      if (!Calc.isNum(r.points)) e.target.value = '';
+    }
     else {
       var n = parseNum(e.target.value);
       r.posTotal = Calc.isNum(n) && n >= 0 ? n : null;
@@ -1219,6 +1287,9 @@
     }
     t.blur();
   });
+  // 따라오는 검색창이 탭 바로 아래에 붙도록 탭 높이를 CSS 에 알려 줌
+  function setTabsH() { var tb = document.getElementById('tabs'); if (tb) document.documentElement.style.setProperty('--tabs-h', tb.offsetHeight + 'px'); }
+  setTabsH(); window.addEventListener('resize', setTabsH);
   fileInput.addEventListener('change', function () { if (fileInput.files[0]) importData(fileInput.files[0]); });
   var docInput = document.getElementById('docfile');
   docInput.addEventListener('change', function () { if (docInput.files[0]) addDoc(docInput.files[0]); });

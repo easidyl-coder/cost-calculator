@@ -149,3 +149,15 @@ textarea.f { min-height: 0; line-height: 1.5; resize: vertical; }
 .lrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 6px 4px; border: 0; border-top: 1px solid #eee; background: none; text-align: left; font-size: 15px; }
 .lrow span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ratetag { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #e6f0ec; color: #2f6f5e; font-size: 14px; font-weight: 700; }
+
+/* 검색창·분류 버튼: 내려도 탭 바로 아래에 붙음 */
+.stick { position: sticky; top: var(--tabs-h, 49px); z-index: 4; background: #f5f6f4; margin: 0 -12px; padding: 0 12px 2px; }
+/* HOT·ICE 묶음 줄 */
+.srow.grp { width: 100%; border: 0; text-align: left; font: inherit; color: inherit; min-height: 60px; }
+.srow .pick { flex: none; min-width: 96px; height: 48px; line-height: 48px; text-align: center; border-radius: 10px; background: #2f6f5e; color: #fff; font-size: 16px; font-weight: 700; }
+.vrows { margin: -2px 0 8px 14px; padding-left: 8px; border-left: 3px solid #2f6f5e; }
+.srow .pick { min-width: 92px; }
+.ptrow { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 14px; color: #555; }
+.ptrow label { flex: none; margin: 0; font-size: 14px; font-weight: 400; }
+.ptrow input { flex: none; width: 96px; height: 34px; min-height: 34px; margin: 0; padding: 2px 8px; font-size: 16px; text-align: right; }
+.ptrow span { flex: none; font-size: 14px; }

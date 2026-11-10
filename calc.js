@@ -56,7 +56,8 @@
   function fmtUnitCost(n) { return String(parseFloat(n.toFixed(3))); }
 
   // 하루 판매 정리. rec = { items:[{price,cost,qty}], posTotal } (원가는 판매를 넣을 때의 값으로 저장돼 있음)
-  // 매출 = 포스 합계를 넣었으면 그 값, 아니면 메뉴 판매가 × 개수의 합. 번 돈 = 매출 − 원가 (고정비는 빠짐)
+  // 매출 = 포스 합계를 넣었으면 그 값, 아니면 메뉴 판매가 × 개수의 합 − 포인트 사용액. 번 돈 = 매출 − 원가 (고정비는 빠짐)
+  // 포스 합계는 이미 실제로 받은 돈이라 포인트를 또 빼지 않음
   function daySummary(rec) {
     var menuSales = 0, cost = 0, cups = 0;
     ((rec && rec.items) || []).forEach(function (it) {
@@ -65,8 +66,10 @@
       cost += (isNum(it.cost) ? it.cost : 0) * it.qty;
       cups += it.qty;
     });
-    var sales = rec && isNum(rec.posTotal) ? rec.posTotal : menuSales;
-    return { sales: sales, menuSales: menuSales, cost: cost, profit: sales - cost, cups: cups,
+    var points = rec && isNum(rec.points) && rec.points > 0 ? rec.points : 0;
+    var usePos = rec && isNum(rec.posTotal);
+    var sales = usePos ? rec.posTotal : menuSales - points;
+    return { sales: sales, menuSales: menuSales, points: points, pointsOff: usePos ? 0 : points, cost: cost, profit: sales - cost, cups: cups,
              rate: sales > 0 ? cost / sales : null };
   }
 
