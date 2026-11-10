@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 20;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 21;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   // 새 변수는 state 를 만들기 전에 선언한다 (뒤에 두면 저장된 자료가 있을 때 빈 화면이 뜬 적이 있음)
   var LEDGER_NAMES = {};
   Calc.LEDGER_CATS.forEach(function (c) { LEDGER_NAMES[c[0]] = c[1]; });
@@ -167,7 +167,7 @@
         ? ' · 메뉴로 계산한 매출(' + Calc.fmtWon(s.menuSales) + '원)과 ' + Calc.fmtWon(Math.abs(r.posTotal - s.menuSales)) + '원 차이' : '') +
       '</div>' + leftLine(saleDate, s) + soldLine(r) + '</div>';
   }
-  // 위에 한 줄로 "이날 판 메뉴" 보여 주기 (늘 한 줄 높이라 +·− 눌러도 화면이 안 밀림). 누르면 맨 아래 목록으로
+  // 위에 한 줄로 "이날 판 메뉴" 보여 주기 (작은 글씨로 전부, 줄이 늘면 changeQty 가 화면 위치를 맞춤). 누르면 맨 아래 목록으로
   function soldLine(r) {
     var t = (r.items || []).map(function (it) { return esc(it.name) + ' ' + it.qty; }).join(' · ');
     return '<button class="soldline" data-act="go-sold">' + (t ? '판 메뉴: ' + t : '아직 판 메뉴 없음') + '</button>';
