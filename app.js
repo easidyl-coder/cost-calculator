@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 18;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 19;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   // 새 변수는 state 를 만들기 전에 선언한다 (뒤에 두면 저장된 자료가 있을 때 빈 화면이 뜬 적이 있음)
   var LEDGER_NAMES = {};
   Calc.LEDGER_CATS.forEach(function (c) { LEDGER_NAMES[c[0]] = c[1]; });
@@ -195,7 +195,8 @@
     var pop = popularity();
     // 분류 안에서는 자주 파는 메뉴가 위로 (분류 순서는 메뉴 탭과 같음). 순서는 화면을 새로 열 때만 바뀜
     var list = state.menus.slice().sort(function (a, b) { return (pop[b.id] || 0) - (pop[a.id] || 0); });
-    box.innerHTML = '<div id="soldbox">' + soldHtml(r, qty) + '</div>' + grouped('sales', list, function (m) { return saleRow(m, 'list', qty); });
+    // 메뉴 목록이 검색창 바로 아래, "이날 판 메뉴"는 맨 아래
+    box.innerHTML = grouped('sales', list, function (m) { return saleRow(m, 'list', qty); }) + '<div id="soldbox">' + soldHtml(r, qty) + '</div>';
   }
   // +·− 를 누를 때: 목록은 다시 그리지 않고 그 메뉴 숫자와 "이날 판 메뉴"만 고침 (화면이 움직이지 않게)
   function updateSales(id) {
@@ -1185,6 +1186,20 @@
     else if (document.getElementById('m-prev')) {
       if (e.target.tagName === 'SELECT') { readRows(); drawRows(); } else updateMenuPreview();
     }
+  });
+  // 엔터: 입력창 안에서는 다음 칸으로 내려가고, 마지막 칸·검색창·판매 화면에서는 키보드를 내림
+  document.addEventListener('keydown', function (e) {
+    var t = e.target;
+    if (e.key !== 'Enter' || e.isComposing || t.tagName !== 'INPUT' || t.type === 'file' || t.type === 'checkbox') return;
+    e.preventDefault();
+    if (t.id !== 'q' && !sheet.hidden && sheet.contains(t)) {
+      var fs = [].filter.call(sheet.querySelectorAll('input'), function (x) {
+        return !x.disabled && x.type !== 'hidden' && x.type !== 'file' && x.offsetParent !== null;
+      });
+      var nx = fs[fs.indexOf(t) + 1];
+      if (nx) { nx.focus(); return; }
+    }
+    t.blur();
   });
   fileInput.addEventListener('change', function () { if (fileInput.files[0]) importData(fileInput.files[0]); });
   var docInput = document.getElementById('docfile');
