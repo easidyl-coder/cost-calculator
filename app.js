@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 21;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 23;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   // 새 변수는 state 를 만들기 전에 선언한다 (뒤에 두면 저장된 자료가 있을 때 빈 화면이 뜬 적이 있음)
   var LEDGER_NAMES = {};
   Calc.LEDGER_CATS.forEach(function (c) { LEDGER_NAMES[c[0]] = c[1]; });
@@ -202,6 +202,17 @@
     var list = state.menus.slice().sort(function (a, b) { return (pop[b.id] || 0) - (pop[a.id] || 0); });
     // 메뉴 목록이 검색창 바로 아래, "이날 판 메뉴"는 맨 아래
     box.innerHTML = grouped('sales', list, function (m) { return saleRow(m, 'list', qty); }) + '<div id="soldbox">' + soldHtml(r, qty) + '</div>';
+    // 첫 분류 제목 오른쪽에도 ↺ (늘 자리를 차지하고 판 게 없을 때는 숨김 → 나타나도 화면이 안 밀림)
+    var head = box.querySelector('.cathead');
+    if (head && head.parentNode === box) {
+      head.className += ' row';
+      head.insertAdjacentHTML('beforeend', '<button id="topclear" class="mini danger" data-act="day-clear" aria-label="초기화" title="초기화">↺</button>');
+    }
+    showTopClear(r);
+  }
+  function showTopClear(r) {
+    var b = document.getElementById('topclear');
+    if (b) b.style.visibility = r.items && r.items.length ? 'visible' : 'hidden';
   }
   // +·− 를 누를 때: 목록은 다시 그리지 않고 그 메뉴 숫자와 "이날 판 메뉴"만 고침 (화면이 움직이지 않게)
   function updateSales(id) {
@@ -209,6 +220,7 @@
     drawSum(r);
     var sb = document.getElementById('soldbox');
     if (sb) sb.innerHTML = soldHtml(r, qty);
+    showTopClear(r);
     var m = state.menus.filter(function (x) { return x.id === id; })[0];
     var rows = document.querySelectorAll('#mlist [data-row="list"]');
     for (var i = 0; i < rows.length; i++) if (m && rows[i].getAttribute('data-id') === id) rows[i].outerHTML = saleRow(m, 'list', qty);
