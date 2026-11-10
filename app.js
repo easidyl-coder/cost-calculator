@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KEY = 'wongagesan.v1';
-  var APP_VER = 19;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
+  var APP_VER = 20;   // sw.js 의 VERSION 과 같이 올린다 (백업 탭에 보임)
   // 새 변수는 state 를 만들기 전에 선언한다 (뒤에 두면 저장된 자료가 있을 때 빈 화면이 뜬 적이 있음)
   var LEDGER_NAMES = {};
   Calc.LEDGER_CATS.forEach(function (c) { LEDGER_NAMES[c[0]] = c[1]; });
@@ -165,7 +165,12 @@
       '<div class="sub">' + s.cups + '개 판매 · 원가율 ' + Calc.fmtPct(s.rate) +
       (Calc.isNum(r.posTotal) && Math.round(r.posTotal) !== Math.round(s.menuSales)
         ? ' · 메뉴로 계산한 매출(' + Calc.fmtWon(s.menuSales) + '원)과 ' + Calc.fmtWon(Math.abs(r.posTotal - s.menuSales)) + '원 차이' : '') +
-      '</div>' + leftLine(saleDate, s) + '</div>';
+      '</div>' + leftLine(saleDate, s) + soldLine(r) + '</div>';
+  }
+  // 위에 한 줄로 "이날 판 메뉴" 보여 주기 (늘 한 줄 높이라 +·− 눌러도 화면이 안 밀림). 누르면 맨 아래 목록으로
+  function soldLine(r) {
+    var t = (r.items || []).map(function (it) { return esc(it.name) + ' ' + it.qty; }).join(' · ');
+    return '<button class="soldline" data-act="go-sold">' + (t ? '판 메뉴: ' + t : '아직 판 메뉴 없음') + '</button>';
   }
   function qtyMap(r) { var q = {}; r.items.forEach(function (it) { q[it.menuId] = it; }); return q; }
   // sec: 'top'(이날 판 메뉴) / 'list'(분류별 목록)
@@ -1142,6 +1147,7 @@
       case 'doc-open': openDoc(id); break;
       case 'doc-fill': fillFromDoc(id); break;
       case 'day-clear': clearDay(); break;
+      case 'go-sold': var sb = document.getElementById('soldbox'); if (sb && sb.firstChild) sb.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
       case 'doc-get':   // 넣어 둔 레시피북 파일을 다시 휴대폰에 내려받기
         idbDo('readonly', function (s) { return s.get(id); }).then(function (d) {
           if (d) download(niceName(d.name), d.blob);

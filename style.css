@@ -95,6 +95,7 @@ textarea.f { min-height: 0; line-height: 1.5; resize: vertical; }
 .datebar b { font-size: 19px; }
 .datebar .nav { min-width: 48px; min-height: 48px; border: 1px solid #ccc; border-radius: 10px; background: #fff; font-size: 24px; color: #2f6f5e; }
 .card.sum { margin-top: 8px; }
+.soldline { display: block; width: 100%; margin-top: 8px; padding: 8px 10px; border: 0; border-radius: 8px; background: #eef5f2; color: #2f6f5e; font-size: 14px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .weather { display: flex; gap: 6px; margin: 8px 0; }
 .weather button { flex: 1; min-height: 44px; border: 1px solid #ccc; border-radius: 10px; background: #fff; font-size: 18px; }
 .weather button.on { border: 2px solid #2f6f5e; background: #e6f0ec; font-weight: 700; }
